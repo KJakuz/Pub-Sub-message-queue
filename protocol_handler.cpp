@@ -2,21 +2,54 @@
 #include <sys/socket.h>
 #include <iostream>
 #include <charconv>
+#include <cstring>
 
-std::string get_client_id(int client_socket){
-    char buffer[16];
-    int bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
-    if(bytes_received == -1){
-        perror("recv error");
-        return "";
+Client get_client_id(Client client){
+    while(true){
+        char buffer[16] = {};
+        int bytes_received = recv(client.socket, buffer, sizeof(buffer), 0);
+        if(bytes_received <= 0){
+            perror("recv error");
+            return client;
+        }
+        
+        std::string id(buffer, bytes_received);
+        id.erase(id.find_last_not_of(" \n\r\t") + 1);
+
+        if (id.length() < 2){
+            const char* answer = "id too short\n"; //TODO PROTOKOL SERWER -> KLIENT
+            send(client.socket, answer, strlen(answer), 0);
+            continue;
+        }
+        
+        bool id_taken = false;
+        {
+            std::lock_guard<std::mutex> lock(clients_mutex);
+            
+            if(clients.find(id) != clients.end()){
+                id_taken = true;
+            } else {
+                client.id = id;
+                clients[id] = client;  // Dodaj klienta do mapy
+            }
+        }
+        
+        if(id_taken){
+            const char* answer = "id already used\n";
+            send(client.socket, answer, strlen(answer), 0);
+            continue;
+        }
+        client.id = id;
+        const char* answer = "id accepted\n"; 
+        send(client.socket, answer, strlen(answer), 0);
+        std::cout << "Client " << client.id << " connected\n";
+        break;
     }
-    std::string client_id = std::string(buffer, bytes_received);
-    client_id.erase(client_id.find_last_not_of(" \n\r\t") + 1);
-    return client_id;
+    return client;
 }
 
 std::tuple<bool, std::string, std::string> validate_message(char buffer[], int bytes_received){
-    if (bytes_received < PACKET_HEADER_SIZE) return {false, "", ""};
+    if (bytes_received < PACKET_HEADER_SIZE) return {false, "d", ""};
     
     int content_size = 0;
     const auto [ptr, ec] = std::from_chars(buffer + 2, buffer + 6, content_size);
@@ -25,7 +58,7 @@ std::tuple<bool, std::string, std::string> validate_message(char buffer[], int b
         return {false, "", ""};
     }
 
-    std::cout<<"TEST:\n";
+    std::cout<<"DEBUG:\n";
     std::cout<<"CONTENT_SIZE:"<<content_size<<"\n";
     std::cout<<"BYTES_RECV:"<<bytes_received - PACKET_HEADER_SIZE<<"\n";
 

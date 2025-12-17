@@ -11,7 +11,6 @@ void create_queue(int client_socket, std::string queue_name);
 void delete_queue(int client_socket, std::string queue_name);
 void publish_message_to_queue(int client_socket, std::string content);
 
-extern std::vector<Client> clients;
 extern std::mutex clients_mutex;
 
 #endif
