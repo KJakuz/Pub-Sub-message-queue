@@ -1,4 +1,5 @@
-#include "server_client_operations.h"
+#include "protocol_handler.h"
+#include "message_operations.h"
 
 #include <stdio.h>
 #include <sys/socket.h>
@@ -14,6 +15,8 @@
 #include <unordered_set>
 #include <csignal>
 #include <atomic>
+#include <tuple>
+
 
 std::atomic<bool> running(true);
 int listening_socket_global;
@@ -21,6 +24,7 @@ int listening_socket_global;
 std::unordered_set<std::string> active_client_ids;
 std::mutex clients_mutex;
 std::mutex queues_mutex;
+std::vector<Client> clients;
 
 char messages_simple[1024];
 int messages_simple_size = 0;
@@ -61,42 +65,51 @@ void handle_client(int client_socket){
     }
     std::cout << "Client " << client.id <<" connected"<<"\n";
 
+
     //CLIENT OPERATIONS
     while(true){
-        //GET CLIENT TYPE
-        client.type = get_client_type(client_socket);
-        if(client.type == "error"){
-            perror("uncorrect client type");
-            continue;
-        }
-        else if(client.type == "disconnected"){
+        
+        //CHECK WHAT MESSAGE IS BEING SENT
+        char buffer[1024] = {};
+        int bytes_received = 0;
+
+            //get message sender,type,size and content
+        bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
+        if(bytes_received == -1){
+            perror("recv error");
             break;
         }
-        else if(client.type == "sub"){
-            //SUBSCRIBE QUEUE
-            //READ SUBSCRIBED QUEUES
-            std::cout<<"client "<<client.id<<" type: "<<client.type<<"\n";
-            //send_messages(client_socket, client.subscribed_queues);
-            if (messages_simple_size > 0){
-                send(client_socket, messages_simple, messages_simple_size, 0);
-                std::cout<<messages_simple<<" was sent to "<<client.id<<"\n";
-            }
-        }
-        else if(client.type == "pub"){
-            //CREATE NEW QUEUE
-            //DELETE QUEUE
-            //SEND MESSAGE TO QUEUE
 
-            std::cout<<"client "<<client.id<<" type: "<<client.type<<"\n";
-            messages_simple_size = recv(client_socket, messages_simple, sizeof(messages_simple), 0);
-            messages_simple[messages_simple_size - 1] = '\0';
-            std::cout<<messages_simple<<" was received from "<<client.id<<"\n";
-            
-        }
+        bool valid;
+        std::string msg_type;
+        std::string msg_content;
 
-        if (recv(client_socket, NULL, 0, 0) == 0){
+        std::tie(valid, msg_type, msg_content) = validate_message(buffer, bytes_received);
+
+        if (!valid){
+            perror("message validation error");
             break;
         }
+
+        if(msg_type == "SM"){
+            send_messages_to_subscriber(client_socket);
+        }
+        else if(msg_type == "SS"){
+            subscribe_to_queue(client_socket, msg_content);
+        }
+        else if(msg_type == "SU"){
+            unsubscribe_from_queue(client_socket,msg_content);
+        }
+        else if(msg_type == "PC"){
+            create_queue(client_socket,msg_content);
+        }
+        else if(msg_type == "PD"){
+            delete_queue(client_socket,msg_content);
+        }
+        else if(msg_type == "PB"){
+            publish_message_to_queue(client_socket,msg_content);
+        }
+        
     }
 
     //DISCONNECT CLIENT WHEN CLIENT LEAVES AND CLEAR DATA
@@ -110,7 +123,6 @@ void handle_client(int client_socket){
     return;
 }
 
-std::vector<Client> clients;
 
 int main(int argc, char  **argv){
 
