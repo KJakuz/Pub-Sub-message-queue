@@ -2,6 +2,7 @@
 #include <sys/socket.h>
 #include <iostream>
 #include <charconv>
+#include <string>
 
 std::string get_client_id(int client_socket){
     char buffer[16];
