@@ -35,18 +35,29 @@ void MessageQueueClient::disconnect() {
 bool MessageQueueClient::create_queue(const std::string &queue_name) {
     char mode = ClientMode["PUBLISHER"];
     std::string message = Protocol::prepare_message(mode, 'c', queue_name);
-    for (unsigned char c : message)
-    {
-        printf("%02X ", c);
-    }
-    printf("\n");
-    MessageQueueClient::send_message(_socket, message);
+    return MessageQueueClient::send_message(_socket, message);
 }
 
 bool MessageQueueClient::delete_queue(const std::string &queue_name) {
     char mode = ClientMode["PUBLISHER"];
     std::string message = Protocol::prepare_message(mode, 'd', queue_name);
-    MessageQueueClient::send_message(_socket, message);
+    return MessageQueueClient::send_message(_socket, message);
+}
+
+bool MessageQueueClient::publish(const std::string &queue_name, std::string &content) {
+    // TODO: How to sent name and content?
+}
+
+bool MessageQueueClient::subscribe(const std::string &queue_name) {
+    char mode = ClientMode["SUBSCRIBER"];
+    std::string message = Protocol::prepare_message(mode, 's', queue_name);
+    return MessageQueueClient::send_message(_socket, message);
+}
+
+bool MessageQueueClient::unsubscribe(const std::string &queue_name) {
+    char mode = ClientMode["PUBLISHER"];
+    std::string message = Protocol::prepare_message(mode, 'u', queue_name);
+    return MessageQueueClient::send_message(_socket, message);
 }
 
 bool MessageQueueClient::send_message(int sock, const std::string &data) {

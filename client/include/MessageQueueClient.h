@@ -30,6 +30,5 @@ public:
 
 private:
     int _socket;
-    int _socket;
     int client_id;
 };
