@@ -3,7 +3,7 @@
 #include <string>
 #include <map>
 
-std::map<std::string, char> ClientMode = {
+inline std::map<std::string, char> ClientMode = {
     {"PUBLISHER", 'P'},
     {"SUBSCRIBER", 'S'}
 };
@@ -30,5 +30,7 @@ public:
 
 private:
     int _socket;
-    int client_id;
+    int _client_id;
+    bool _connected;
+    void _receiver_loop();
 };

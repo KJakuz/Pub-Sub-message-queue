@@ -45,7 +45,9 @@ bool MessageQueueClient::delete_queue(const std::string &queue_name) {
 }
 
 bool MessageQueueClient::publish(const std::string &queue_name, std::string &content) {
-    // TODO: How to sent name and content?
+    char mode = ClientMode["PUBLISHER"];
+    std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, 3600);
+    std::string message = Protocol::prepare_message(mode, 'd', internal_payload);
 }
 
 bool MessageQueueClient::subscribe(const std::string &queue_name) {
@@ -75,4 +77,10 @@ bool MessageQueueClient::send_message(int sock, const std::string &data) {
         total_sent += sent;
     }
     return true;
+}
+
+void MessageQueueClient::_receiver_loop() {
+    while(_connected) {
+        // TODO: Receiver loop logic.        
+    }
 }
