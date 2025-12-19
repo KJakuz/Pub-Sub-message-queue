@@ -11,6 +11,7 @@
 #include <csignal>
 #include <atomic>
 #include <tuple>
+#include <unistd.h>
 
 
 std::atomic<bool> running(true);
