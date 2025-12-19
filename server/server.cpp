@@ -6,13 +6,8 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-#include <vector>
-#include <string>
-#include <iostream>
 #include <thread>
 #include <chrono>
-#include <mutex>
-#include <unordered_set>
 #include <csignal>
 #include <atomic>
 #include <tuple>
@@ -22,10 +17,11 @@
 std::atomic<bool> running(true);
 int listening_socket_global;
 
-std::unordered_set<std::string> active_client_ids;
 std::mutex clients_mutex;
 std::mutex queues_mutex;
-std::vector<Client> clients;
+std::unordered_map<std::string, Client> clients;
+std::vector<Queue> Existing_Queues;
+
 
 char messages_simple[1024];
 int messages_simple_size = 0;
@@ -44,28 +40,13 @@ void signal_handler(int signal){
 void handle_client(int client_socket){
     //GET CLIENT INFO AND VALIDATE ID
     Client client;
-    client.socket_fd = client_socket;
-    client.id = get_client_id(client_socket);
+    client.socket = client_socket;
+    client = get_client_id(client);
     
     {
         std::lock_guard<std::mutex> lock(clients_mutex);
-        
-        if(active_client_ids.find(client.id) != active_client_ids.end()){
-            perror("client already exists");
-            close(client_socket);
-            return;
-        }
-        
-        active_client_ids.insert(client.id);
+        clients[client.id] = client;
     }
-
-    if(client.id.empty() ){
-        perror("client id error");
-        close(client_socket);
-        return;
-    }
-    std::cout << "Client " << client.id <<" connected"<<"\n";
-
 
     //CLIENT OPERATIONS
     while(true){
@@ -85,30 +66,44 @@ void handle_client(int client_socket){
         std::string msg_type;
         std::string msg_content;
 
+        std::cout<<"DEBUG:\n";
+        std::cout<<"QUEUES: [";
+        for(size_t i = 0; i < Existing_Queues.size(); i++){
+            std::cout<<Existing_Queues[i].name;
+            if(i < Existing_Queues.size() - 1) std::cout<<", ";
+        }
+        std::cout<<"]\n";
+
         std::tie(valid, msg_type, msg_content) = validate_message(buffer, bytes_received);
 
-        if (!valid){
-            perror("message validation error");
+        if (!valid && msg_type == "d"){
+            shutdown(client.socket, SHUT_RDWR);
+            close(client.socket);
+            break;
+        }
+        else if(!valid){
+            perror("message not valid");
             break;
         }
 
         if(msg_type == "SM"){
-            send_messages_to_subscriber(client_socket);
+            std::cout<<"WYSLANO~!!!\n";
+            send_messages_to_subscriber(client);
         }
         else if(msg_type == "SS"){
-            subscribe_to_queue(client_socket, msg_content);
+            subscribe_to_queue(client, msg_content);
         }
         else if(msg_type == "SU"){
-            unsubscribe_from_queue(client_socket,msg_content);
+            unsubscribe_from_queue(client,msg_content);
         }
         else if(msg_type == "PC"){
-            create_queue(client_socket,msg_content);
+            create_queue(client,msg_content);
         }
         else if(msg_type == "PD"){
-            delete_queue(client_socket,msg_content);
+            delete_queue(client,msg_content);
         }
-        else if(msg_type == "PB"){
-            publish_message_to_queue(client_socket,msg_content);
+        else if(msg_type == "PA"){
+            publish_message_to_queue(client,msg_content);
         }
         
     }
@@ -117,7 +112,7 @@ void handle_client(int client_socket){
     std::cout<<"client "<<client.id<<" disconnected\n";
     {
         std::lock_guard<std::mutex> lock(clients_mutex);
-        active_client_ids.erase(client.id);
+        clients.erase(client.id);
     }
     shutdown(client_socket, SHUT_RDWR);
     close(client_socket);
@@ -170,10 +165,21 @@ int main(int argc, char  **argv){
         t.detach();
     }
 
+
+
     //DISCONNECT CLIENTS WHEN SERVER IS SHUT DOWN
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        for(auto& [id, client] : clients){
+            shutdown(client.socket, SHUT_RDWR);
+            close(client.socket);
+        }
+        clients.clear();
+    }
+
     shutdown(listening_socket, SHUT_RDWR);
     close(listening_socket);
-    std::cout << "Server cleanup complete\n";
+    std::cout << "Server cleanup complete\n"; //TODO: recv error: Bad file descriptor \n recv error: Bad file descriptor
 
     return 0;
 }
