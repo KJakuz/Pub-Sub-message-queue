@@ -19,6 +19,8 @@ int listening_socket_global;
 std::mutex clients_mutex;
 std::mutex queues_mutex;
 std::unordered_map<std::string, Client> clients;
+std::vector<Queue> Existing_Queues;
+
 
 char messages_simple[1024];
 int messages_simple_size = 0;
@@ -63,6 +65,14 @@ void handle_client(int client_socket){
         std::string msg_type;
         std::string msg_content;
 
+        std::cout<<"DEBUG:\n";
+        std::cout<<"QUEUES: [";
+        for(size_t i = 0; i < Existing_Queues.size(); i++){
+            std::cout<<Existing_Queues[i].name;
+            if(i < Existing_Queues.size() - 1) std::cout<<", ";
+        }
+        std::cout<<"]\n";
+
         std::tie(valid, msg_type, msg_content) = validate_message(buffer, bytes_received);
 
         if (!valid && msg_type == "d"){
@@ -76,22 +86,23 @@ void handle_client(int client_socket){
         }
 
         if(msg_type == "SM"){
-            send_messages_to_subscriber(client_socket);
+            std::cout<<"WYSLANO~!!!\n";
+            send_messages_to_subscriber(client);
         }
         else if(msg_type == "SS"){
-            subscribe_to_queue(client_socket, msg_content);
+            subscribe_to_queue(client, msg_content);
         }
         else if(msg_type == "SU"){
-            unsubscribe_from_queue(client_socket,msg_content);
+            unsubscribe_from_queue(client,msg_content);
         }
         else if(msg_type == "PC"){
-            create_queue(client_socket,msg_content);
+            create_queue(client,msg_content);
         }
         else if(msg_type == "PD"){
-            delete_queue(client_socket,msg_content);
+            delete_queue(client,msg_content);
         }
-        else if(msg_type == "PB"){
-            publish_message_to_queue(client_socket,msg_content);
+        else if(msg_type == "PA"){
+            publish_message_to_queue(client,msg_content);
         }
         
     }
@@ -167,7 +178,7 @@ int main(int argc, char  **argv){
 
     shutdown(listening_socket, SHUT_RDWR);
     close(listening_socket);
-    std::cout << "Server cleanup complete\n";
+    std::cout << "Server cleanup complete\n"; //TODO: recv error: Bad file descriptor \n recv error: Bad file descriptor
 
     return 0;
 }
