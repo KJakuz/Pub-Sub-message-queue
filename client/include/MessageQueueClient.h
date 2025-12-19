@@ -2,11 +2,9 @@
 
 #include <string>
 #include <map>
+#include <thread>
 
-inline std::map<std::string, char> ClientMode = {
-    {"PUBLISHER", 'P'},
-    {"SUBSCRIBER", 'S'}
-};
+
 
 class MessageQueueClient
 {
@@ -33,4 +31,5 @@ private:
     int _client_id;
     bool _connected;
     void _receiver_loop();
+    std::thread _receiver_thread;
 };

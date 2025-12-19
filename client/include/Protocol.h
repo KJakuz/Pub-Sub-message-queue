@@ -4,6 +4,16 @@
 #include "MessageQueueClient.h"
 
 const int PACKET_LENGTH = 6;
+inline std::map<std::string, char> ClientMode = {
+    {"PUBLISHER", 'P'},
+    {"SUBSCRIBER", 'S'}};
+
+inline std::map<std::string, char> ClientActions = {
+    {"CREATE_QUEUE", 'C'},
+    {"DELETE_QUEUE", 'D'},
+    {"PUBLISH", 'P'},
+    {"SUBSCRIBE", 'S'},
+    {"UNSUBSCRIBE", 'U'}};
 
 class Protocol 
 {
