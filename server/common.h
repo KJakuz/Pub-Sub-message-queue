@@ -7,6 +7,8 @@
 #include <iostream>
 #include <unordered_map>
 #include <cstring>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 #define PACKET_HEADER_SIZE 6
 #define WITH_ENDLINES 0

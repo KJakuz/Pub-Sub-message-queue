@@ -26,7 +26,38 @@ bool queue_exists(const std::string& queue_name) {
 }
 
 
-//TODO UNSUBSCRIBE WHEN DELETING QUEUE/ NOTIFY SUBSCRIBED USERS WHEN QUEUE CHANGED/ DELETE MESSAGE WHEN TTL ENDS
+//TODO NOTIFY SUBSCRIBED USERS WHEN QUEUE CHANGED/ DELETE MESSAGE WHEN TTL ENDS
+
+void broadcast_queue_list(){
+    /*
+    SENDING MESSAGE THAT LOOKS LIKE THIS: 
+    [TYPE(2b)] [CONTENT_SIZE(4b)] [NUMBER_OF_QUEUES(4b)] [QUEUE1_NAME_SIZE(4b)] [QUEUE1_NAME(n)] [QUEUEX_NAME_SIZE(4b)] [QUEUEX_NAME(n)] 
+    */
+    std::string internal_data;
+   
+    {
+        std::lock_guard<std::mutex> lock(queues_mutex);
+        
+        uint32_t queues_count = htonl(static_cast<uint32_t>(Existing_Queues.size()));
+        internal_data.append(reinterpret_cast<const char*>(&queues_count), 4);
+
+        for (const auto& q : Existing_Queues) {
+            // For every queue: name lenght(4b):Name
+            uint32_t n_len = htonl(static_cast<uint32_t>(q.name.length()));
+            internal_data.append(reinterpret_cast<const char*>(&n_len), 4);
+            internal_data.append(q.name);
+        }
+    }
+
+    std::string packet = prepare_message("IN", internal_data);
+
+    std::lock_guard<std::mutex> lock(clients_mutex);
+    for (auto const& [id, client] : clients) {
+        if (!send_message(client.socket, packet)) {
+            std::cout<<"Błąd wysyłki do "<<id<<"\n";
+        }
+    }
+}
 
 void send_messages_to_subscriber(Client client) {  
     std::lock_guard<std::mutex> lock(queues_mutex);
@@ -70,12 +101,17 @@ void subscribe_to_queue(Client client, std::string queue_name) {
     
     if(valid_op){
         std::cout<<"Subscribed client "<<client.id<<" to queue: "<<queue_name<<"\n";
-        OK_answer(client.socket, "SS");
+        std::string msg = prepare_message("OK","");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: subscribe to queue ok");
+        }
     }
     else{
         std::cout<<"cant subscribe to queue: "<<queue_name<<"\n";
-        std::string error = "NO_QUEUE";
-        ER_answer(client.socket, error);
+        std::string msg = prepare_message("ER","NO_QUEUE");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: subscribe to queue no_queue");
+        }
     }
     return;
 }
@@ -99,12 +135,17 @@ void unsubscribe_from_queue(Client client, std::string queue_name) {
     
     if(valid_op){
         std::cout<<"Unsubscribed client "<<client.id<<" from queue: "<<queue_name<<"\n";
-        OK_answer(client.socket,"SU");
+        std::string msg = prepare_message("OK","");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: unsubscribe to queue ok");
+        }
     }
     else{
         std::cout<<"cant unsubscribe from queue: "<<queue_name<<"\n";
-        std::string error = "NO_QUEUE_WITH_THAT_NAME";
-        ER_answer(client.socket, error);
+        std::string msg = prepare_message("ER","NO_QUEUE");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: unsubscribe to queue no_queue");
+        }
     }
     return;
 }
@@ -127,12 +168,18 @@ void create_queue(Client client, const std::string queue_name) {
     }
     if(valid_op){
         std::cout<<"Created Queue: "<<queue_name<<"\n";
-        OK_answer(client.socket,"PC");
+        std::string msg = prepare_message("OK","");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: create queue ok");
+        }
+        broadcast_queue_list();
     }
     else{
         std::cout<<"cant create queue: "<<queue_name<<"\n";
-        std::string error = "QUEUE_EXISTS";
-        ER_answer(client.socket, error);
+        std::string msg = prepare_message("ER","QUEUE_EXISTS");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: create queue QUEUE_EXISTS");
+        }
     }
     return;
 }
@@ -153,13 +200,20 @@ std::cout << "dq\n";
             valid_op = true;
         }
     }
+
     if (valid_op) {
         std::cout << "Deleted Queue: " << queue_name << "\n";
-        OK_answer(client.socket,"PD");
+        std::string msg = prepare_message("OK","");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: delete queue ok");
+        }
+        broadcast_queue_list();
     } else {
         std::cout << "Cannot delete queue: " << queue_name << " (not found)\n";
-        std::string error = "NO_QUEUE_WITH_THAT_NAME";
-        ER_answer(client.socket, error);
+        std::string msg = prepare_message("ER","NO_QUEUE");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: create queue NO_QUEUE");
+        }
     }
     
     return;
@@ -172,7 +226,11 @@ void publish_message_to_queue(Client client, std::string content) {
     std::string message;
 
     if (content.length() < 2) {
-        ER_answer(client.socket, "DATA_TOO_SHORT");
+        std::cout<<"data_to_short publish\n";
+        std::string msg = prepare_message("ER","DATA_TO_SHORT");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: publish DATA_TO_SHORT");
+        }
         return;
     }
 
@@ -180,7 +238,10 @@ void publish_message_to_queue(Client client, std::string content) {
         queue_name_size = std::stoi(content.substr(0, 2));
 
         if (content.length() < (2 + queue_name_size)) {
-            ER_answer(client.socket, "INVALID_QUEUE_NAME_LENGTH");
+            std::string msg = prepare_message("ER","INVALID_QUEUE_NAME_LENGTH");
+            if(!send_message(client.socket, msg)){
+                perror("couldnt send message to client: publish INVALID_QUEUE_NAME_LENGTH");
+            }
             return;
         }
 
@@ -190,7 +251,10 @@ void publish_message_to_queue(Client client, std::string content) {
         std::cout << "DEBUG: Dlugosc: " << queue_name_size << " Kolejka: " << queue_name << " Msg: " << message << std::endl;
     } 
     catch (...) {
-        ER_answer(client.socket, "CONTENT PARSING ERROR");
+        std::string msg = prepare_message("ER","CONTENT_PARSING_ERROR");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: publish CONTENT_PARSING_ERROR");
+        }
         return;
     }
 
@@ -208,25 +272,17 @@ void publish_message_to_queue(Client client, std::string content) {
     
     if(valid_op){
         std::cout<<"Published message to queue: "<<queue_name<<"\n";
-        OK_answer(client.socket, "PA");
+        std::string msg = prepare_message("OK","");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: publish ok");
+        }
     }
     else{
         std::cout<<"cant publish to queue: "<<queue_name<<"\n";
-        std::string error = "NO_QUEUE_WITH_THAT_NAME";
-        ER_answer(client.socket, error);
+        std::string msg = prepare_message("ER","NO_QUEUE");
+        if(!send_message(client.socket, msg)){
+            perror("couldnt send message to client: publish NO_QUEUE");
+        }
     }
-    return;
-}
-
-void OK_answer(int client_socket, std::string content){
-    std::string answer = "OK:" + content;
-    send(client_socket, answer.c_str(), answer.length(),0);
-    return;
-}
-
-
-void ER_answer(int client_socket, std::string content){
-    std::string answer = "ER:" + content;
-    send(client_socket, answer.c_str(), answer.length(),0);
     return;
 }
