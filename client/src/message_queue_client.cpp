@@ -15,17 +15,17 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
         std::cerr << gai_strerror(err) << std::endl;
         return false;
     }
-    int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (connect(sock, res->ai_addr, res->ai_addrlen) == -1) {
+    _socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (connect(_socket, res->ai_addr, res->ai_addrlen) == -1) {
         std::cerr << "Error with connect" << std::endl;
         freeaddrinfo(res);
-        close(sock);
+        close(_socket);
         return false;
     }
 
     std::cout << "Connected: " << host.c_str() << ":" << port.c_str() << std::endl;
-    _socket = sock;
     _connected = true;
+    //TODO Send client_id ?
     _receiver_thread = std::thread(&MessageQueueClient::_receiver_loop, this);
     return true;
 }
@@ -71,7 +71,7 @@ bool MessageQueueClient::subscribe(const std::string &queue_name) {
 bool MessageQueueClient::unsubscribe(const std::string &queue_name) {
     char mode = ClientMode["PUBLISHER"];
     char action = ClientActions["UNSUBSCRIBE"];
-    std::string message = Protocol::prepare_message(mode, 'u', queue_name);
+    std::string message = Protocol::prepare_message(mode, action, queue_name);
     return MessageQueueClient::send_message(_socket, message);
 }
 
@@ -92,12 +92,22 @@ bool MessageQueueClient::send_message(int sock, const std::string &data) {
     return true;
 }
 
+bool MessageQueueClient::read_exactly(int sock, char *buffer, size_t size) {
+    size_t total_read = 0;
+    while (total_read < size)
+    {
+        ssize_t received = recv(sock, buffer + total_read, size - total_read, 0);
+        if (received <= 0)
+            return false;
+        total_read += received;
+    }
+    return true;
+}
+
 void MessageQueueClient::_receiver_loop() {
     char header_buffer[6];
     while (_connected) {
-        ssize_t received_header = recv(_socket, header_buffer, 6, 0);
-
-        if (received_header <= 0)
+        if (!read_exactly(_socket, header_buffer, 6))
         {
             std::cout << "Połączenie zamknięte przez serwer.\n";
             _connected = false;
@@ -117,6 +127,8 @@ void MessageQueueClient::_receiver_loop() {
                 full_payload.assign(payload_buffer.begin(), payload_buffer.begin() + received_data);
             }
         }
+
+        // HANDLING GIVEN MESSAGE TYPES
 
         if (role == 'I' && cmd == 'N')
         {
