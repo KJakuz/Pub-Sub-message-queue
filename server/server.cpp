@@ -86,11 +86,7 @@ void handle_client(int client_socket){
             break;
         }
 
-        if(msg_type == "SM"){
-            std::cout<<"WYSLANO~!!!\n";
-            send_messages_to_subscriber(client);
-        }
-        else if(msg_type == "SS"){
+        if(msg_type == "SS"){
             subscribe_to_queue(client, msg_content);
         }
         else if(msg_type == "SU"){
@@ -102,7 +98,7 @@ void handle_client(int client_socket){
         else if(msg_type == "PD"){
             delete_queue(client,msg_content);
         }
-        else if(msg_type == "PA"){
+        else if(msg_type == "PB"){
             publish_message_to_queue(client,msg_content);
         }
         

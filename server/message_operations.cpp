@@ -26,7 +26,7 @@ bool queue_exists(const std::string& queue_name) {
 }
 
 
-//TODO NOTIFY SUBSCRIBED USERS WHEN QUEUE CHANGED/ DELETE MESSAGE WHEN TTL ENDS
+//TODO PUBLISH MESSAGE LOGIC WITH SENDING TO SUBSCRIBERS NEW MSG / SEND ALL MESSAGESS TO SUBSCRIBING CLIENT / DELETE MESSAGE WHEN TTL ENDS
 
 void broadcast_queue_list(){
     /*
@@ -51,11 +51,51 @@ void broadcast_queue_list(){
 
     std::string packet = prepare_message("IN", internal_data);
 
-    std::lock_guard<std::mutex> lock(clients_mutex);
-    for (auto const& [id, client] : clients) {
-        if (!send_message(client.socket, packet)) {
-            std::cout<<"Błąd wysyłki do "<<id<<"\n";
+    std::vector<int> target_sockets;
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        for (auto const& [id, client] : clients) {
+            target_sockets.push_back(client.socket);
         }
+    }
+
+    for (int sock : target_sockets) {
+        if (!send_message(sock, packet)) {
+            std::cout<<"broadcasting error for "<<sock<<"\n";
+        }
+    }
+}
+
+void send_published_message(Client client,std::string &queue_name, std::string &content){
+    /*
+    SENDING MESSAGE THAT LOOKS LIKE THIS: 
+    [TYPE(2b)] [CONTENT_SIZE(4b)] [QUEUE_NAME_SIZE(4b)] [QUEUE_NAME(n)] [MESSAGE(n)] 
+    */
+    std::string internal_data;
+    bool exists = false;
+
+    {
+    std::lock_guard<std::mutex> lock(queues_mutex);
+    if (queue_exists(queue_name)) {
+        exists = true;
+        internal_data.reserve(4 + queue_name.size() + content.size());
+
+        uint32_t n_len = htonl(static_cast<uint32_t>(queue_name.length()));
+        internal_data.append(reinterpret_cast<const char*>(&n_len), sizeof(n_len));
+
+        internal_data.append(queue_name);
+        internal_data.append(content);
+    }
+    }
+
+    if (!exists){ 
+        return;
+    }
+
+    std::string full_packet = prepare_message("MS", internal_data);
+
+    if (!send_message(client.socket, full_packet)) {
+        std::cerr << "sending published message to socket: " << client.socket << " error \n";
     }
 }
 
@@ -220,69 +260,60 @@ std::cout << "dq\n";
 }
 
 void publish_message_to_queue(Client client, std::string content) {
+    if (content.length() < 8) {
+        send_message(client.socket, prepare_message("ER", "DATA_TOO_SHORT"));
+        return;
+    }
+
+    uint32_t n_len, n_ttl;
+    std::memcpy(&n_len, content.data(), 4);
+    std::memcpy(&n_ttl, content.data() + 4, 4);
+    
+    uint32_t queue_name_size = ntohl(n_len);
+    uint32_t ttl = ntohl(n_ttl);
+
+    if (content.length() < (8 + queue_name_size)) {
+        send_message(client.socket, prepare_message("ER", "INVALID_NAME_OR_CONTENT"));
+        return;
+    }
+    
+    std::string queue_name = content.substr(8, queue_name_size);
+    std::string message_body = content.substr(8 + queue_name_size);
+
+    std::vector<int> subscribers_sockets;
     bool valid_op = false;
-    int queue_name_size;
-    std::string queue_name;
-    std::string message;
-
-    if (content.length() < 2) {
-        std::cout<<"data_to_short publish\n";
-        std::string msg = prepare_message("ER","DATA_TO_SHORT");
-        if(!send_message(client.socket, msg)){
-            perror("couldnt send message to client: publish DATA_TO_SHORT");
-        }
-        return;
-    }
-
-    try {
-        queue_name_size = std::stoi(content.substr(0, 2));
-
-        if (content.length() < (2 + queue_name_size)) {
-            std::string msg = prepare_message("ER","INVALID_QUEUE_NAME_LENGTH");
-            if(!send_message(client.socket, msg)){
-                perror("couldnt send message to client: publish INVALID_QUEUE_NAME_LENGTH");
-            }
-            return;
-        }
-
-        queue_name = content.substr(2, queue_name_size);
-        message = content.substr(2 + queue_name_size);
-
-        std::cout << "DEBUG: Dlugosc: " << queue_name_size << " Kolejka: " << queue_name << " Msg: " << message << std::endl;
-    } 
-    catch (...) {
-        std::string msg = prepare_message("ER","CONTENT_PARSING_ERROR");
-        if(!send_message(client.socket, msg)){
-            perror("couldnt send message to client: publish CONTENT_PARSING_ERROR");
-        }
-        return;
-    }
-
 
     {
         std::lock_guard<std::mutex> lock(queues_mutex);
-        
         auto it = find_queue_by_name(queue_name);
-        
+
         if (it != Existing_Queues.end()) {
-            it->messages.push_back(message);
+            //TTL TEZ
+            it->messages.push_back(message_body);
+            
+            std::lock_guard<std::mutex> lock_c(clients_mutex);
+            for (const std::string& sub_id : it->subscribers) {
+                if (clients.count(sub_id)) {
+                    subscribers_sockets.push_back(clients[sub_id].socket);
+                }
+            }
             valid_op = true;
         }
     }
-    
-    if(valid_op){
-        std::cout<<"Published message to queue: "<<queue_name<<"\n";
-        std::string msg = prepare_message("OK","");
-        if(!send_message(client.socket, msg)){
-            perror("couldnt send message to client: publish ok");
+
+
+    if (valid_op) {
+        send_message(client.socket, prepare_message("OK", ""));
+
+        for (int sub_sock : subscribers_sockets) {
+            Client temp_client; 
+            temp_client.socket = sub_sock;
+            send_published_message(temp_client, queue_name, message_body);
         }
+        
+        std::cout << "DEBUG: Published to " << queue_name << " for " << subscribers_sockets.size() << " subs.\n";
+    } 
+    else {
+        send_message(client.socket, prepare_message("ER", "NO_QUEUE"));
     }
-    else{
-        std::cout<<"cant publish to queue: "<<queue_name<<"\n";
-        std::string msg = prepare_message("ER","NO_QUEUE");
-        if(!send_message(client.socket, msg)){
-            perror("couldnt send message to client: publish NO_QUEUE");
-        }
-    }
-    return;
 }
