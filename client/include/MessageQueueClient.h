@@ -29,7 +29,14 @@ public:
 private:
     int _socket;
     int _client_id;
-    bool _connected;
+    std::atomic<bool> _connected;
     void _receiver_loop();
+
+    std::vector<std::string> _available_queues;
+    
+    std::tuple<std::string, std::string> _handle_message_payload(const std::string &payload);
+    std::vector<std::string> _handle_queue_list_payload(const std::string &payload);
+
+
     std::thread _receiver_thread;
 };

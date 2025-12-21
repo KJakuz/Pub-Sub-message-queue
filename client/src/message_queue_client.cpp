@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <iostream>
 #include <thread>
+#include <vector>
 
 bool MessageQueueClient::connect_to_server(const std::string &host, const std::string &port, const int &client_id) {
     addrinfo hints{ .ai_family = AF_INET, .ai_socktype = SOCK_STREAM, .ai_protocol = IPPROTO_TCP }, *res{};
@@ -92,13 +93,98 @@ bool MessageQueueClient::send_message(int sock, const std::string &data) {
 }
 
 void MessageQueueClient::_receiver_loop() {
-    while(_connected) {
-        char buf[1024];
-        ssize_t bytes_read = recv(_socket, buf, 1024, 0);
-        if (bytes_read > 0) {
-            std::cout << "Bytes received from server: " << bytes_read << std::endl;
+    char header_buffer[6];
+    while (_connected) {
+        ssize_t received_header = recv(_socket, header_buffer, 6, 0);
+
+        if (received_header <= 0)
+        {
+            std::cout << "Połączenie zamknięte przez serwer.\n";
+            _connected = false;
+            break;
+        }
+        std::string header_str(header_buffer, 6);
+        auto [role, cmd, payload_len] = Protocol::_decode_packet(header_str);
+
+        std::string full_payload = "";
+        if (payload_len > 0)
+        {
+            std::vector<char> payload_buffer(payload_len);
+            ssize_t received_data = recv(_socket, payload_buffer.data(), payload_len, 0);
+
+            if (received_data > 0)
+            {
+                full_payload.assign(payload_buffer.begin(), payload_buffer.begin() + received_data);
+            }
+        }
+
+        if (role == 'I' && cmd == 'N')
+        {
+            _available_queues = _handle_queue_list_payload(full_payload);
+            for (auto queue : _available_queues) {
+                std::cout << "Kolejka dostepna: " << queue <<std::endl;
+            }
+        }
+        else if (role == 'M' && cmd == 'S')
+        {
+            auto [q_name, content] = _handle_message_payload(full_payload);
+            std::cout << "Wiadomosc: " << q_name << ", " << content << std::endl;
         }
     }
+}
+
+std::tuple<std::string, std::string> MessageQueueClient::_handle_message_payload(const std::string &payload) {
+    if (payload.size() < 4) {
+        // Nie ma dlugosci nazwy
+    }
+
+    uint32_t q_name_size_net;
+    std::memcpy(&q_name_size_net, payload.data(), sizeof(uint32_t));
+    uint32_t q_name_size = ntohl(q_name_size_net);
+
+    if (4 + q_name_size > payload.size())
+    {
+        std::cerr << "Błąd: Rozmiar nazwy kolejki przekracza rozmiar danych!" << std::endl;
+    }
+
+    std::string queue_name = payload.substr(4, q_name_size);
+    std::string message_content = payload.substr(4 + q_name_size);
+
+    return {queue_name, message_content};
+}
+
+std::vector<std::string> MessageQueueClient::_handle_queue_list_payload(const std::string &payload) {
+    std::vector<std::string> queues;
+
+    if (payload.size() < 4)
+        return queues;
+
+    uint32_t count_net;
+    std::memcpy(&count_net, payload.data(), 4);
+    uint32_t count = ntohl(count_net);
+
+    size_t offset = 4;
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        if (offset + 4 > payload.size())
+            break;
+
+        uint32_t name_len_net;
+        std::memcpy(&name_len_net, payload.data() + offset, 4);
+        uint32_t name_len = ntohl(name_len_net);
+        offset += 4;
+
+        if (offset + name_len > payload.size())
+            break;
+
+        std::string q_name = payload.substr(offset, name_len);
+        queues.push_back(q_name);
+
+        offset += name_len; 
+    }
+
+    return queues;
 }
 
 MessageQueueClient::MessageQueueClient() {}

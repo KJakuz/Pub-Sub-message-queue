@@ -25,3 +25,19 @@ std::string Protocol::_pack_publish_data(const std::string &queue_name, const st
 
     return internal_payload;
 }
+
+std::tuple<char, char, uint32_t> Protocol::_decode_packet(const std::string &full_message) {
+        if (full_message.size() < 6)
+        {
+            return {0, 0, 0};
+        }
+
+        char role = full_message[0];
+        char cmd = full_message[1];
+
+        uint32_t payload_len_net;
+        std::memcpy(&payload_len_net, full_message.data() + 2, sizeof(uint32_t));
+        uint32_t payload_len = ntohl(payload_len_net);
+
+        return {role, cmd, payload_len};
+}
