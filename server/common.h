@@ -12,6 +12,7 @@
 
 #define PACKET_HEADER_SIZE 6
 #define WITH_ENDLINES 0
+#define SECONDS_TO_CLEAR_CLIENT 10
 
 struct Message {
     std::string text;
@@ -28,7 +29,7 @@ struct Queue {
 struct Client {
     std::string id;
     int socket;
-    std::string type;
+    std::chrono::steady_clock::time_point disconnect_time;
 };
 
 
