@@ -13,9 +13,14 @@
 #define PACKET_HEADER_SIZE 6
 #define WITH_ENDLINES 0
 
+struct Message {
+    std::string text;
+    std::chrono::steady_clock::time_point expire;
+};
+
 struct Queue {
     std::string name;
-    std::vector<std::string> messages;
+    std::vector<Message> messages;
     std::vector<std::string> subscribers;
     int ttl;
 };
@@ -25,6 +30,7 @@ struct Client {
     int socket;
     std::string type;
 };
+
 
 extern std::vector<Queue> Existing_Queues; 
 extern std::unordered_map<std::string,Client> clients;

@@ -99,32 +99,49 @@ void send_published_message(Client client,std::string &queue_name, std::string &
     }
 }
 
-void send_messages_to_subscriber(Client client) {  
+void send_messages_to_new_subscriber(Client client, std::string queue_name) { 
+    /*
+    SENDING MESSAGE THAT LOOKS LIKE THIS: 
+    [TYPE(2b)] [CONTENT_SIZE(4b)] [QUEUE_NAME_SIZE(4b)] [QUEUE_NAME(n)] [MESSAGE1_SIZE(4b)] [MESSAGE1(n)] ... [MESSAGEn_SIZE(4b)] [MESSAGEn(n)] 
+    */
+    std::string internal_data;
+    bool exists = false;
+
+    {
     std::lock_guard<std::mutex> lock(queues_mutex);
-    
-    for(auto& queue : Existing_Queues){
-        if(is_client_subscribed(queue, client.id) && !queue.messages.empty()){
-            std::stringstream ss;
-            ss << queue.name << ":\n";
-            
-            for(const auto& msg : queue.messages){
-                ss << "\t " << msg << "\n";
-            }
-            
-            std::string full_response = ss.str();
-            ssize_t sent_bytes = send(client.socket, full_response.c_str(), full_response.length(), 0);
-            
-            if (sent_bytes >= 0) {
-                queue.messages.clear();
+    auto it = find_queue_by_name(queue_name);
+    if (it != Existing_Queues.end()) {
+        exists = true;
+        auto now = std::chrono::steady_clock::now();
+
+        uint32_t n_len = htonl(static_cast<uint32_t>(queue_name.length()));
+        internal_data.append(reinterpret_cast<const char*>(&n_len), 4);
+        internal_data.append(queue_name);
+
+        auto msg_it = it->messages.begin();
+        while (msg_it != it->messages.end()) {
+            if (msg_it->expire <= now) {
+                msg_it = it->messages.erase(msg_it);
             } else {
-                perror("send failed");
+                uint32_t m_len = htonl(static_cast<uint32_t>(msg_it->text.length()));
+                internal_data.append(reinterpret_cast<const char*>(&m_len), 4);
+                internal_data.append(msg_it->text);
+                ++msg_it;
             }
         }
     }
+    }
+
+    if (!exists || internal_data.empty()) return;
+
+    std::string full_packet = prepare_message("MA", internal_data);
+    send_message(client.socket, full_packet);
+    return;
 }
 
+
 void subscribe_to_queue(Client client, std::string queue_name) {
-   bool valid_op = false;
+    bool valid_op = false;
     
     {
         std::lock_guard<std::mutex> lock(queues_mutex);
@@ -145,6 +162,7 @@ void subscribe_to_queue(Client client, std::string queue_name) {
         if(!send_message(client.socket, msg)){
             perror("couldnt send message to client: subscribe to queue ok");
         }
+        send_messages_to_new_subscriber(client, queue_name);
     }
     else{
         std::cout<<"cant subscribe to queue: "<<queue_name<<"\n";
@@ -260,6 +278,7 @@ std::cout << "dq\n";
 }
 
 void publish_message_to_queue(Client client, std::string content) {
+    
     if (content.length() < 8) {
         send_message(client.socket, prepare_message("ER", "DATA_TOO_SHORT"));
         return;
@@ -279,6 +298,7 @@ void publish_message_to_queue(Client client, std::string content) {
     
     std::string queue_name = content.substr(8, queue_name_size);
     std::string message_body = content.substr(8 + queue_name_size);
+    auto msg_expire= std::chrono::steady_clock::now() + std::chrono::seconds(ttl);
 
     std::vector<int> subscribers_sockets;
     bool valid_op = false;
@@ -288,8 +308,7 @@ void publish_message_to_queue(Client client, std::string content) {
         auto it = find_queue_by_name(queue_name);
 
         if (it != Existing_Queues.end()) {
-            //TTL TEZ
-            it->messages.push_back(message_body);
+            it->messages.push_back({message_body,msg_expire});
             
             std::lock_guard<std::mutex> lock_c(clients_mutex);
             for (const std::string& sub_id : it->subscribers) {
