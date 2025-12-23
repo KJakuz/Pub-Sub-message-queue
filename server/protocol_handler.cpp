@@ -6,67 +6,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-Client get_client_id(Client client){
-    while(true){
-        char buffer[1024] = {};
-        int bytes_received = recv(client.socket, buffer, sizeof(buffer), 0);
-
-        bool valid;
-        std::string msg_type;
-        std::string id;
-        std::tie(valid, msg_type, id) = validate_message(buffer, bytes_received);
-        if (!valid && msg_type == "d"){
-            shutdown(client.socket, SHUT_RDWR);
-            close(client.socket);
-            return client;
-        }
-        else if(!valid){
-            perror("message not valid");
-            continue;
-        }
-
-        if(msg_type == "LO"){
-            id.erase(id.find_last_not_of(" \n\r\t") + 1);
-
-            if (id.length() < 2){
-                std::string msg = prepare_message("ER","ID_SHORT");
-                if(!send_message(client.socket, msg)){
-                    perror("couldnt send message to client: get id lenght error");
-                }
-                continue;
-            }
-            
-            bool id_taken = false;
-            {
-                std::lock_guard<std::mutex> lock(clients_mutex);
-                
-                if(clients.find(id) != clients.end()){
-                    id_taken = true;
-                } else {
-                    client.id = id;
-                    clients[id] = client;
-                }
-            }
-            
-            if(id_taken){
-                std::string msg = prepare_message("ER","ID_TAKEN");
-                if(!send_message(client.socket, msg)){
-                    perror("couldnt send message to client: get id is taken");
-                }
-                continue;
-            }
-            client.id = id;
-            std::string msg = prepare_message("OK","");
-            if(!send_message(client.socket, msg)){
-                perror("couldnt send message to client: get id OK");
-            }
-            std::cout << "Client " << client.id << " connected\n";
-            break;
-        }
-    }
-    return client;
-}
-
 std::tuple<bool, std::string, std::string> validate_message(char buffer[], int bytes_received){
     if (bytes_received < PACKET_HEADER_SIZE) return {false, "d", ""};
     
@@ -86,7 +25,7 @@ std::tuple<bool, std::string, std::string> validate_message(char buffer[], int b
 
     std::cout << "DEBUG: \nTYPE: " << message_type << "      SIZE: " << content_size <<"     CONTENT: "<<content<<"\n";
 
-    if (message_type == "LO"||message_type == "SM" || message_type == "SS" || message_type == "SU" || message_type == "PC" || message_type == "PD" || message_type == "PB"){
+    if (message_type == "LO" || message_type == "SS" || message_type == "SU" || message_type == "PC" || message_type == "PD" || message_type == "PB"){
         return {true, message_type, content};
         }
     else{

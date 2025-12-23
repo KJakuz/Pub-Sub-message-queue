@@ -1,5 +1,6 @@
 #include "protocol_handler.h"
 #include "message_operations.h"
+#include "client_operations.h"
 
 #include <stdio.h>
 #include <sys/socket.h>
@@ -13,6 +14,7 @@
 #include <tuple>
 #include <unistd.h>
 
+//TODO:WORKER CLEANUP THREAD / WYSLANIE PRZY LOGOWANIU LISTY KOLEJEK
 
 std::atomic<bool> running(true);
 int listening_socket_global;
@@ -22,9 +24,6 @@ std::mutex queues_mutex;
 std::unordered_map<std::string, Client> clients;
 std::vector<Queue> Existing_Queues;
 
-
-char messages_simple[1024];
-int messages_simple_size = 0;
 
 void signal_handler(int signal){
     if(signal == SIGINT){
@@ -37,22 +36,16 @@ void signal_handler(int signal){
     }
 }
 
+
 void handle_client(int client_socket){
     //GET CLIENT INFO AND VALIDATE ID
     Client client;
-    client.socket = client_socket;
-    client = get_client_id(client);
-    
-    {
-        std::lock_guard<std::mutex> lock(clients_mutex);
-        clients[client.id] = client;
-    }
 
     //CLIENT OPERATIONS
     while(true){
         
         //CHECK WHAT MESSAGE IS BEING SENT
-        char buffer[1024] = {};
+        char buffer[8192] = {};     //TODO: HOW BIG BUFFER (PROTOCOL ALLOWS CONTENT TO BE 4GB)
         int bytes_received = 0;
 
             //get message sender,type,size and content
@@ -66,6 +59,7 @@ void handle_client(int client_socket){
         std::string msg_type;
         std::string msg_content;
 
+        //DEBUG
         std::cout<<"DEBUG:\n";
         std::cout<<"QUEUES: [";
         for(size_t i = 0; i < Existing_Queues.size(); i++){
@@ -73,6 +67,8 @@ void handle_client(int client_socket){
             if(i < Existing_Queues.size() - 1) std::cout<<", ";
         }
         std::cout<<"]\n";
+        //DEBUG END
+
 
         std::tie(valid, msg_type, msg_content) = validate_message(buffer, bytes_received);
 
@@ -82,33 +78,56 @@ void handle_client(int client_socket){
             break;
         }
         else if(!valid){
-            perror("message not valid");
-            break;
+            std::cerr<<"ERROR MESSAGE NOT VALID FROM SOCKET:"<<client.socket<<"\n";
+            continue;
         }
 
-        if(msg_type == "SS"){
-            subscribe_to_queue(client, msg_content);
+        if(client.id.empty()){
+            if(msg_type == "LO"){
+                client.socket = client_socket;
+                client = get_client_id(client, msg_content);
+            }
+            else{
+                if(!send_message(client.socket, prepare_message("LO","ER:FIRST YOU MUST LOG IN"))){
+                    std::cerr<<"ERROR SENDING MESSAGE LO:ER TO SOCKET:"<<client.socket<<"\n";
+                }
+            }
         }
-        else if(msg_type == "SU"){
-            unsubscribe_from_queue(client,msg_content);
-        }
-        else if(msg_type == "PC"){
-            create_queue(client,msg_content);
-        }
-        else if(msg_type == "PD"){
-            delete_queue(client,msg_content);
-        }
-        else if(msg_type == "PB"){
-            publish_message_to_queue(client,msg_content);
+        else
+        {
+            if(msg_type == "SS"){
+                subscribe_to_queue(client, msg_content);
+            }
+            else if(msg_type == "SU"){
+                unsubscribe_from_queue(client,msg_content);
+            }
+            else if(msg_type == "PC"){
+                create_queue(client,msg_content);
+            }
+            else if(msg_type == "PD"){
+                delete_queue(client,msg_content);
+            }
+            else if(msg_type == "PB"){
+                publish_message_to_queue(client,msg_content);
+            }
+            else if(msg_type == "LO"){
+                if(!send_message(client.socket, prepare_message("LO","ER:USER_ID_ALREADY_GIVEN"))){
+                    std::cerr<<"ERROR SENDING MESSAGE LO:ER TO "<<client.id<<"\n";
+                }
+            }
         }
         
     }
 
-    //DISCONNECT CLIENT WHEN CLIENT LEAVES AND CLEAR DATA
-    std::cout<<"client "<<client.id<<" disconnected\n";
+    //NOTE THAT CLIENT DISCONECTED
     {
         std::lock_guard<std::mutex> lock(clients_mutex);
-        clients.erase(client.id);
+        auto it = clients.find(client.id);
+        if (it != clients.end()) {
+            it->second.disconnect_time = std::chrono::steady_clock::now();
+            it->second.socket = -1;
+            std::cout << "Client " << client.id << " disconnected (session preserved)\n";
+        }
     }
     shutdown(client_socket, SHUT_RDWR);
     close(client_socket);

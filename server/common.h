@@ -12,10 +12,16 @@
 
 #define PACKET_HEADER_SIZE 6
 #define WITH_ENDLINES 0
+#define SECONDS_TO_CLEAR_CLIENT 10
+
+struct Message {
+    std::string text;
+    std::chrono::steady_clock::time_point expire;
+};
 
 struct Queue {
     std::string name;
-    std::vector<std::string> messages;
+    std::vector<Message> messages;
     std::vector<std::string> subscribers;
     int ttl;
 };
@@ -23,8 +29,9 @@ struct Queue {
 struct Client {
     std::string id;
     int socket;
-    std::string type;
+    std::chrono::steady_clock::time_point disconnect_time;
 };
+
 
 extern std::vector<Queue> Existing_Queues; 
 extern std::unordered_map<std::string,Client> clients;
