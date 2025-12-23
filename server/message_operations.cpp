@@ -26,9 +26,9 @@ bool queue_exists(const std::string& queue_name) {
 }
 
 
-void broadcast_queue_list(){
-    /*
-    SENDING MESSAGE THAT LOOKS LIKE THIS: 
+std::string construct_queue_list(){
+     /*
+    PREPARING MESSAGE THAT LOOKS LIKE THIS: 
     [TYPE(2b)] [CONTENT_SIZE(4b)] [NUMBER_OF_QUEUES(4b)] [QUEUE1_NAME_SIZE(4b)] [QUEUE1_NAME(n)] [QUEUEX_NAME_SIZE(4b)] [QUEUEX_NAME(n)] 
     */
     std::string internal_data;
@@ -47,21 +47,41 @@ void broadcast_queue_list(){
         }
     }
 
-    std::string packet = prepare_message("IN", internal_data);
+    std::string packet = prepare_message("QL", internal_data);
+
+    return packet;
+}
+
+void broadcast_queue_list(){
+    /*
+    SENDING MESSAGE THAT LOOKS LIKE THIS: 
+    [TYPE(2b)] [CONTENT_SIZE(4b)] [NUMBER_OF_QUEUES(4b)] [QUEUE1_NAME_SIZE(4b)] [QUEUE1_NAME(n)] [QUEUEX_NAME_SIZE(4b)] [QUEUEX_NAME(n)] 
+    */
+
+    std::string packet = construct_queue_list();
 
     std::vector<int> target_sockets;
     {
         std::lock_guard<std::mutex> lock(clients_mutex);
         for (auto const& [id, client] : clients) {
-            target_sockets.push_back(client.socket);
+            if (client.socket != -1){
+                target_sockets.push_back(client.socket);
+            }
         }
     }
 
     for (int sock : target_sockets) {
         if (!send_message(sock, packet)) {
-            std::cerr << "SEND_ERROR: IN to socket:" << sock << "\n";
+            std::cerr << "SEND_ERROR: QL to socket:" << sock << "\n";
         }
     }
+}
+
+void send_single_queue_list(Client client){
+    std::string packet = construct_queue_list();
+     if (!send_message(client.socket, packet)) {
+        std::cerr << "SEND_ERROR: QL to socket:" << client.socket << "\n";
+     }
 }
 
 void send_published_message(Client client,std::string &queue_name, std::string &content){
@@ -155,6 +175,7 @@ void notify_after_delete(std::vector<std::string> ids, std::string &queue_name){
 
 void subscribe_to_queue(Client client, std::string queue_name) {
     bool valid_op = false;
+    bool already_subscribed = false;
     
     {
         std::lock_guard<std::mutex> lock(queues_mutex);
@@ -165,6 +186,9 @@ void subscribe_to_queue(Client client, std::string queue_name) {
             if(!is_client_subscribed(*it, client.id)){
                 it->subscribers.push_back(client.id);
                 valid_op = true;
+            }
+            else{
+                already_subscribed = true;
             }
         }
     }
@@ -177,9 +201,16 @@ void subscribe_to_queue(Client client, std::string queue_name) {
         send_messages_to_new_subscriber(client, queue_name);
     }
     else{
-        std::cout<<"cant subscribe to queue: "<<queue_name<<"\n";
-        if(!send_message(client.socket, prepare_message("SS","ER:NO_QUEUE"))){
-            std::cerr << "SEND_ERROR: SS:ER to " << client.id << "\n";
+        if(already_subscribed){
+            std::cout<<"cant subscribe to queue: "<<queue_name<<"\n";
+            if(!send_message(client.socket, prepare_message("SS","ER:ALREADY_SUBSCRIBED"))){
+                std::cerr << "SEND_ERROR: SS:ER to " << client.id << "\n";
+            }
+        }
+        else{
+            if(!send_message(client.socket, prepare_message("SS","ER:NO_QUEUE"))){
+                std::cerr << "SEND_ERROR: SS:ER to " << client.id << "\n";
+            }
         }
     }
     return;
@@ -187,6 +218,7 @@ void subscribe_to_queue(Client client, std::string queue_name) {
 
 void unsubscribe_from_queue(Client client, std::string queue_name) {  
     bool valid_op = false;
+    bool subscribing = true;
     
     {
         std::lock_guard<std::mutex> lock(queues_mutex);
@@ -199,6 +231,9 @@ void unsubscribe_from_queue(Client client, std::string queue_name) {
                 it->subscribers.erase(sub_it);
                 valid_op = true;
             }
+            else{
+                subscribing = false;
+            }
         }
     }
     
@@ -210,9 +245,15 @@ void unsubscribe_from_queue(Client client, std::string queue_name) {
     }
     else{
         std::cout<<"cant unsubscribe from queue: "<<queue_name<<"\n";
-        std::string msg = prepare_message("SU","ER:NO_QUEUE");
-        if(!send_message(client.socket, msg)){
-            std::cerr << "SEND_ERROR: SU:ER to " << client.id << "\n";
+        if(!subscribing){
+            if(!send_message(client.socket, prepare_message("SU","ER:NOT_SUBSCRIBING"))){
+                std::cerr << "SEND_ERROR: SU:ER to " << client.id << "\n";
+            }
+        }
+        else{
+            if(!send_message(client.socket, prepare_message("SU","ER:NO_QUEUE"))){
+                std::cerr << "SEND_ERROR: SU:ER to " << client.id << "\n";
+            }
         }
     }
     return;
@@ -325,7 +366,9 @@ void publish_message_to_queue(Client client, std::string content) {
             std::lock_guard<std::mutex> lock_c(clients_mutex);
             for (const std::string& sub_id : it->subscribers) {
                 if (clients.count(sub_id)) {
-                    subscribers_sockets.push_back(clients[sub_id].socket);
+                    if(clients[sub_id].socket != -1){
+                        subscribers_sockets.push_back(clients[sub_id].socket);
+                    }
                 }
             }
             valid_op = true;

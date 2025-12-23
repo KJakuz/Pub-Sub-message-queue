@@ -15,6 +15,8 @@ void create_queue(Client client, std::string queue_name); //RECV QUEUE NAME TO C
 void delete_queue(Client client, std::string queue_name); //RECV QUEUE NAME TO DELETE: [PD SIZE QUEUE_NAME]
 void publish_message_to_queue(Client client, std::string content); //RECV SINGLE MESSAGE TO INSERT INTO QUEUE: [PB SIZE QUEUE_NAME]
 
+std::string construct_queue_list(); //PREPARES MESSAGE FOR BROADCAST QUEUES LIST AND SEND SINGLE QUEUE LIST
+void send_single_queue_list(Client client); //SEND QUEUES LIST: [QL SIZE QUEUE_SIZE1 QUEUE_NAME1 ... QUEUE_SIZEn QUEUE_NAMEn]
 void broadcast_queues_list(); //SEND QUEUES LIST: [QL SIZE QUEUE_SIZE1 QUEUE_NAME1 ... QUEUE_SIZEn QUEUE_NAMEn]
 void notify_after_delete(std::vector<std::string>); //SEND NOTIFY AFTER DELETE: [ND SIZE QUEUE_X_WAS_DELETED_YOU_WERE_UNSUBSCRIBED_AUTOMATICALLY]
 void send_published_message(Client client,std::string &queue_name, std::string &content); //SEND SINGLE MESSAGE: [MS SIZE QUEUE_NAME_SIZE QUEUE_NAME CONTENT]
