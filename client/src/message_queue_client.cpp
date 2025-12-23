@@ -22,11 +22,12 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
         close(_socket);
         return false;
     }
-
-    std::cout << "Connected: " << host.c_str() << ":" << port.c_str() << std::endl;
-    _connected = true;
-    //TODO Send client_id ?
-    _receiver_thread = std::thread(&MessageQueueClient::_receiver_loop, this);
+    _connected = _verify_connection();
+    if (_connected) {
+        std::cout << "Connected: " << host.c_str() << ":" << port.c_str() << std::endl;
+        _receiver_thread = std::thread(&MessageQueueClient::_receiver_loop, this);
+    }
+    
     return true;
 }
 
@@ -199,7 +200,24 @@ std::vector<std::string> MessageQueueClient::_handle_queue_list_payload(const st
     return queues;
 }
 
-MessageQueueClient::MessageQueueClient() {}
+MessageQueueClient::MessageQueueClient()
+    : MessageQueueClient("")
+{
+}
+
+MessageQueueClient::MessageQueueClient(const std::string &client_login)
+    : _socket(-1),
+      _client_login(client_login),
+      _connected(false)
+{
+}
+
 MessageQueueClient::~MessageQueueClient() {
     disconnect();
+}
+
+bool MessageQueueClient::_verify_connection() {
+    // send client
+    // recive ok
+    return true; // if server approved client_id
 }

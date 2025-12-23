@@ -10,6 +10,7 @@ class MessageQueueClient
 {
 public:
     MessageQueueClient();
+    MessageQueueClient(const std::string &client_login);
     ~MessageQueueClient();
 
     // Connection
@@ -28,16 +29,17 @@ public:
 
 private:
     int _socket;
-    int _client_id;
+    std::string _client_login;
     std::atomic<bool> _connected;
     void _receiver_loop();
 
     std::vector<std::string> _available_queues;
 
-    bool MessageQueueClient::read_exactly(int sock, char *buffer, size_t size);
+    bool read_exactly(int sock, char *buffer, size_t size);
     std::tuple<std::string, std::string> _handle_message_payload(const std::string &payload);
     std::vector<std::string> _handle_queue_list_payload(const std::string &payload);
 
+    bool _verify_connection();
 
     std::thread _receiver_thread;
 };
