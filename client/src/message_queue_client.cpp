@@ -22,22 +22,26 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
         close(_socket);
         return false;
     }
-    _connected = _verify_connection();
-    if (_connected) {
+    freeaddrinfo(res);
+    if (_verify_connection()) {
         std::cout << "Connected: " << host.c_str() << ":" << port.c_str() << std::endl;
+        _connected = true;
         _receiver_thread = std::thread(&MessageQueueClient::_receiver_loop, this);
+        return true;
     }
-    
-    return true;
+
+    close(_socket);
+    _socket = -1;
+    return false;
 }
 
 void MessageQueueClient::disconnect() {
     if (_socket != -1) {
-        if (_connected) {
-            _receiver_thread.detach();
-            shutdown(_socket, SHUT_RDWR);
-        }
+        _connected = false;
+        shutdown(_socket, SHUT_RDWR);
+        if (_receiver_thread.joinable()) _receiver_thread.join();
         close(_socket);
+        _socket = -1;
     }
 }
 
@@ -60,6 +64,7 @@ bool MessageQueueClient::publish(const std::string &queue_name, std::string &con
     char action = ClientActions["PUBLISH"];
     std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, 3600);
     std::string message = Protocol::prepare_message(mode, action, internal_payload);
+    return MessageQueueClient::send_message(_socket, message);
 }
 
 bool MessageQueueClient::subscribe(const std::string &queue_name) {
@@ -70,7 +75,7 @@ bool MessageQueueClient::subscribe(const std::string &queue_name) {
 }
 
 bool MessageQueueClient::unsubscribe(const std::string &queue_name) {
-    char mode = ClientMode["PUBLISHER"];
+    char mode = ClientMode["SUBSCRIBER"];
     char action = ClientActions["UNSUBSCRIBE"];
     std::string message = Protocol::prepare_message(mode, action, queue_name);
     return MessageQueueClient::send_message(_socket, message);
@@ -121,6 +126,7 @@ void MessageQueueClient::_receiver_loop() {
         if (payload_len > 0)
         {
             std::vector<char> payload_buffer(payload_len);
+            // todo read_exactly?
             ssize_t received_data = recv(_socket, payload_buffer.data(), payload_len, 0);
 
             if (received_data > 0)
@@ -142,6 +148,10 @@ void MessageQueueClient::_receiver_loop() {
         {
             auto [q_name, content] = _handle_message_payload(full_payload);
             std::cout << "Wiadomosc: " << q_name << ", " << content << std::endl;
+        }
+        else if (role == 'M' && cmd == 'A')
+        {
+            auto messages_for_queues = _handle_new_sub_messages(full_payload);
         }
     }
 }
@@ -217,7 +227,57 @@ MessageQueueClient::~MessageQueueClient() {
 }
 
 bool MessageQueueClient::_verify_connection() {
-    // send client
-    // recive ok
-    return true; // if server approved client_id
+    std::string login_msg = Protocol::prepare_message('L', 'I', _client_login); 
+    if(!send_message(_socket, login_msg)) return false;
+
+    char header[6];
+    if (!read_exactly(_socket, header, 6)) return false;
+
+    auto [role, cmd, len] = Protocol::_decode_packet(std::string(header, 6));
+
+    std::string payload;
+    if (len > 0) {
+        payload.resize(len);
+        if (!read_exactly(_socket, &payload[0], len)) return false;
+    } // maybe function for that?
+
+    if (role == 'L' && cmd == 'O') {
+        std::cout << "Server accepted login: " << payload << std::endl;
+        return true;
+    }
+    else {
+        std::cerr << "Login failed: " << payload << std::endl;
+        return false;
+    }
+}
+
+std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std::string &payload) {
+    if (payload.size() < 4) return;
+    size_t offset = 0;
+    uint32_t  q_name_len_net;
+    std::memcpy(&q_name_len_net, payload.data() + offset, 4);
+    uint32_t q_name_len = ntohl(q_name_len_net);
+    offset += 4;
+
+    if (offset + q_name_len > payload.size()) return;
+    std::string queue_name = payload.substr(offset, q_name_len);
+    offset += q_name_len;
+
+    std::vector<std::string> messages;
+
+    while (offset + 4 <= payload.size()){
+        uint32_t msg_len_net;
+        std::memcpy(&msg_len_net, payload.data() + offset, 4);
+        uint32_t msg_len = ntohl(msg_len_net);
+        offset += 4;
+
+        if (offset + msg_len > payload.size())
+            break;
+
+        std::string message_text = payload.substr(offset, msg_len);
+        messages.push_back(message_text);
+        offset += msg_len;
+    }
+
+    return messages;
 }

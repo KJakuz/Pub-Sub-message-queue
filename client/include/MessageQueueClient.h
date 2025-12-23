@@ -38,6 +38,7 @@ private:
     bool read_exactly(int sock, char *buffer, size_t size);
     std::tuple<std::string, std::string> _handle_message_payload(const std::string &payload);
     std::vector<std::string> _handle_queue_list_payload(const std::string &payload);
+    std::vector<std::string> _handle_new_sub_messages(const std::string &payload);
 
     bool _verify_connection();
 
