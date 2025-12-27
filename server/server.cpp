@@ -13,8 +13,7 @@
 #include <atomic>
 #include <tuple>
 #include <unistd.h>
-
-//TODO:WORKER CLEANUP THREAD / WYSLANIE PRZY LOGOWANIU LISTY KOLEJEK
+#include <netdb.h>
 
 std::atomic<bool> running(true);
 int listening_socket_global;
@@ -23,6 +22,46 @@ std::mutex clients_mutex;
 std::mutex queues_mutex;
 std::unordered_map<std::string, Client> clients;
 std::vector<Queue> Existing_Queues;
+
+
+void cleanup_worker() {
+    while (running) {
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        if (!running) break;
+        
+        auto now = std::chrono::steady_clock::now();
+        
+        //clients cleanup
+        {
+            std::lock_guard<std::mutex> lock(clients_mutex);
+            for (auto it = clients.begin(); it != clients.end(); ) {
+                if (it->second.socket == -1) {
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                        now - it->second.disconnect_time).count();
+                    if (elapsed >= SECONDS_TO_CLEAR_CLIENT) {
+                        std::cout << "Removing expired client: " << it->first << "\n";
+                        it = clients.erase(it);
+                        continue;
+                    }
+                }
+                ++it;
+            }
+        }
+        
+        //messages cleanup
+        {
+            std::lock_guard<std::mutex> lock(queues_mutex);
+            for (auto& queue : Existing_Queues) {
+                auto& msgs = queue.messages;
+                msgs.erase(
+                    std::remove_if(msgs.begin(), msgs.end(),
+                        [&now](const Message& m) { return now > m.expire; }),
+                    msgs.end()
+                );
+            }
+        }
+    }
+}
 
 
 void signal_handler(int signal){
@@ -38,46 +77,23 @@ void signal_handler(int signal){
 
 
 void handle_client(int client_socket){
-    //GET CLIENT INFO AND VALIDATE ID
     Client client;
 
-    //CLIENT OPERATIONS
     while(running){
+        //read message
+        int status;
+        std::string msg_type, msg_content;
+        std::tie(status, msg_type, msg_content) = recv_message(client_socket);
         
-        //CHECK WHAT MESSAGE IS BEING SENT
-        char buffer[8192] = {};     //TODO: HOW BIG BUFFER (PROTOCOL ALLOWS CONTENT TO BE 4GB)
-        int bytes_received = 0;
-
-            //get message sender,type,size and content
-        bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
-        if(bytes_received == -1){
+        if (status == 0) {
+            std::cout <<client.id<<"disconnected\n";
+            break;
+        }
+        else if (status < 0 && msg_type.empty()) {
             perror("recv error");
             break;
         }
-
-        bool valid;
-        std::string msg_type;
-        std::string msg_content;
-
-        //DEBUG
-        std::cout<<"DEBUG:\n";
-        std::cout<<"QUEUES: [";
-        for(size_t i = 0; i < Existing_Queues.size(); i++){
-            std::cout<<Existing_Queues[i].name;
-            if(i < Existing_Queues.size() - 1) std::cout<<", ";
-        }
-        std::cout<<"]\n";
-        //DEBUG END
-
-
-        std::tie(valid, msg_type, msg_content) = validate_message(buffer, bytes_received);
-
-        if (!valid && msg_type == "d"){
-            shutdown(client.socket, SHUT_RDWR);
-            close(client.socket);
-            break;
-        }
-        else if(!valid){
+        else if (status < 0) {
             std::cerr<<"ERROR MESSAGE NOT VALID FROM SOCKET:"<<client.socket<<"\n";
             continue;
         }
@@ -120,7 +136,7 @@ void handle_client(int client_socket){
         
     }
 
-    //NOTE THAT CLIENT DISCONECTED
+    //client disconnected
     {
         std::lock_guard<std::mutex> lock(clients_mutex);
         auto it = clients.find(client.id);
@@ -137,37 +153,52 @@ void handle_client(int client_socket){
 
 
 int main(int argc, char  **argv){
+    
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << " <port>\n";
+        return -1;
+    }
 
     signal(SIGINT, signal_handler);
 
-    int listening_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if(listening_socket == -1){
+    struct addrinfo hints{}, *res;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    int gai_err = getaddrinfo(NULL, argv[1], &hints, &res);
+    if (gai_err != 0) {
+        std::cerr << "getaddrinfo error: " << gai_strerror(gai_err) << "\n";
+        return -1;
+    }
+
+    int listening_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (listening_socket == -1) {
         perror("socket error");
+        freeaddrinfo(res);
         return -1;
     }
     listening_socket_global = listening_socket;
 
-    sockaddr_in server_address;
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(3333);
-    server_address.sin_addr.s_addr = inet_addr("127.0.0.1");
-
     int opt = 1;
     setsockopt(listening_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-
-    if(bind(listening_socket, (sockaddr*) &server_address, sizeof(server_address)) == -1){
+    if (bind(listening_socket, res->ai_addr, res->ai_addrlen) == -1) {
         perror("bind error");
         close(listening_socket);
+        freeaddrinfo(res);
         return -1;
     }
+    freeaddrinfo(res);
 
-
-    if (listen(listening_socket, SOMAXCONN) == -1){
+    if (listen(listening_socket, SOMAXCONN) == -1) {
         perror("listen error");
         close(listening_socket);
         return -1;
     }
+
+    // Start worker thread
+    std::thread worker(cleanup_worker);
 
     while(running){ 
         int client_socket = accept(listening_socket, NULL, NULL);
@@ -181,9 +212,9 @@ int main(int argc, char  **argv){
         t.detach();
     }
 
+    // Stop worker thread
+    worker.join();
 
-
-    //DISCONNECT CLIENTS WHEN SERVER IS SHUT DOWN
     {
         std::lock_guard<std::mutex> lock(clients_mutex);
         for(auto& [id, client] : clients){
@@ -193,7 +224,6 @@ int main(int argc, char  **argv){
         clients.clear();
     }
 
-    std::cout << "Server cleanup complete\n"; //TODO: recv error: Bad file descriptor \n recv error: Bad file descriptor
-
+    std::cout << "Server cleanup complete\n";
     return 0;
 }

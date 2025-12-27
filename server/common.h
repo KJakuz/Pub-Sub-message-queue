@@ -12,7 +12,7 @@
 
 #define PACKET_HEADER_SIZE 6
 #define WITH_ENDLINES 0
-#define SECONDS_TO_CLEAR_CLIENT 10
+#define SECONDS_TO_CLEAR_CLIENT 30
 
 struct Message {
     std::string text;
