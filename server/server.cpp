@@ -16,13 +16,24 @@
 #include <netdb.h>
 
 std::atomic<bool> running(true);
-int listening_socket_global;
+std::atomic<int> listening_socket_global(-1);
 
 std::mutex clients_mutex;
 std::mutex queues_mutex;
+std::mutex log_mutex;
 std::unordered_map<std::string, Client> clients;
 std::vector<Queue> Existing_Queues;
 
+
+void safe_print(const std::string& msg) {
+    std::lock_guard<std::mutex> lock(log_mutex);
+    std::cout << msg << std::endl;
+}
+
+void safe_error(const std::string& msg) {
+    std::lock_guard<std::mutex> lock(log_mutex);
+    std::cerr << msg << std::endl;
+}
 
 void cleanup_worker() {
     while (running) {
@@ -39,7 +50,7 @@ void cleanup_worker() {
                     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                         now - it->second.disconnect_time).count();
                     if (elapsed >= SECONDS_TO_CLEAR_CLIENT) {
-                        std::cout << "Removing expired client: " << it->first << "\n";
+                        safe_print("Removing expired client: " + it->first);
                         it = clients.erase(it);
                         continue;
                     }
@@ -66,7 +77,7 @@ void cleanup_worker() {
 
 void signal_handler(int signal){
     if(signal == SIGINT){
-        std::cout<<"\nShutting down server...\n";
+        safe_print("\nShutting down server...");
         running = false;
         if(listening_socket_global != -1){
             shutdown(listening_socket_global, SHUT_RDWR);
@@ -77,24 +88,35 @@ void signal_handler(int signal){
 
 
 void handle_client(int client_socket){
+    //timeout after CLIENT_READ_TIMEOUT seconds of no activity
+    struct timeval tv;
+    tv.tv_sec = CLIENT_READ_TIMEOUT;
+    tv.tv_usec = 0;
+    if (setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv) < 0) {
+        safe_error("setsockopt SO_RCVTIMEO failed");
+        shutdown(client_socket, SHUT_RDWR);
+        close(client_socket);
+        return;
+    }
+
     Client client;
+    client.socket = client_socket;
 
     while(running){
-        //read message
         int status;
         std::string msg_type, msg_content;
         std::tie(status, msg_type, msg_content) = recv_message(client_socket);
         
         if (status == 0) {
-            std::cout <<client.id<<"disconnected\n";
+            safe_print(client.id + " disconnected");
             break;
         }
         else if (status < 0 && msg_type.empty()) {
-            perror("recv error");
+            safe_error("recv error from socket " + std::to_string(client_socket));
             break;
         }
         else if (status < 0) {
-            std::cerr<<"ERROR MESSAGE NOT VALID FROM SOCKET:"<<client.socket<<"\n";
+            safe_error("ERROR MESSAGE NOT VALID FROM SOCKET:" + std::to_string(client.socket));
             continue;
         }
 
@@ -106,7 +128,7 @@ void handle_client(int client_socket){
             }
             else{
                 if(!send_message(client.socket, prepare_message("LO","ER:FIRST YOU MUST LOG IN"))){
-                    std::cerr<<"ERROR SENDING MESSAGE LO:ER TO SOCKET:"<<client.socket<<"\n";
+                    safe_error("ERROR SENDING MESSAGE LO:ER TO SOCKET:" + std::to_string(client.socket));
                 }
             }
         }
@@ -129,7 +151,7 @@ void handle_client(int client_socket){
             }
             else if(msg_type == "LO"){
                 if(!send_message(client.socket, prepare_message("LO","ER:USER_ID_ALREADY_GIVEN"))){
-                    std::cerr<<"ERROR SENDING MESSAGE LO:ER TO "<<client.id<<"\n";
+                    safe_error("ERROR SENDING MESSAGE LO:ER TO " + client.id);
                 }
             }
         }
@@ -143,7 +165,7 @@ void handle_client(int client_socket){
         if (it != clients.end()) {
             it->second.disconnect_time = std::chrono::steady_clock::now();
             it->second.socket = -1;
-            std::cout << "Client " << client.id << " disconnected (session preserved)\n";
+            safe_print("Client " + client.id + " disconnected (session preserved)");
         }
     }
     shutdown(client_socket, SHUT_RDWR);
@@ -155,7 +177,7 @@ void handle_client(int client_socket){
 int main(int argc, char  **argv){
     
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <port>\n";
+        safe_error("Usage: " + std::string(argv[0]) + " <port>");
         return -1;
     }
 
@@ -168,13 +190,13 @@ int main(int argc, char  **argv){
 
     int gai_err = getaddrinfo(NULL, argv[1], &hints, &res);
     if (gai_err != 0) {
-        std::cerr << "getaddrinfo error: " << gai_strerror(gai_err) << "\n";
+        safe_error("getaddrinfo error: " + std::string(gai_strerror(gai_err)));
         return -1;
     }
 
     int listening_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (listening_socket == -1) {
-        perror("socket error");
+        safe_error("socket creation failed");
         freeaddrinfo(res);
         return -1;
     }
@@ -184,7 +206,7 @@ int main(int argc, char  **argv){
     setsockopt(listening_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     if (bind(listening_socket, res->ai_addr, res->ai_addrlen) == -1) {
-        perror("bind error");
+        safe_error("bind failed");
         close(listening_socket);
         freeaddrinfo(res);
         return -1;
@@ -192,7 +214,7 @@ int main(int argc, char  **argv){
     freeaddrinfo(res);
 
     if (listen(listening_socket, SOMAXCONN) == -1) {
-        perror("listen error");
+        safe_error("listen failed");
         close(listening_socket);
         return -1;
     }
@@ -204,15 +226,14 @@ int main(int argc, char  **argv){
         int client_socket = accept(listening_socket, NULL, NULL);
         if(client_socket == -1){
             if(running){
-                perror("accept error");
-                break;
+                safe_error("accept failed");
             }
+            break;
         }
         std::thread t(handle_client, client_socket);
         t.detach();
     }
 
-    // Stop worker thread
     worker.join();
 
     {
@@ -224,6 +245,6 @@ int main(int argc, char  **argv){
         clients.clear();
     }
 
-    std::cout << "Server cleanup complete\n";
+    safe_print("Server cleanup complete");
     return 0;
 }

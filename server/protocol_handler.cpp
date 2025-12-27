@@ -54,7 +54,7 @@ std::tuple<int, std::string, std::string> recv_message(int sock) {
         if (payload_result < 0) return {-1, "", ""};
     }
     
-    std::cout << "DEBUG: TYPE: " << msg_type << " SIZE: " << payload_size << " CONTENT: " << msg_content << "\n";
+    safe_print("DEBUG: TYPE: " + msg_type + " SIZE: " + std::to_string(payload_size) + " CONTENT: " + msg_content);
     
     if (msg_type == "LO" || msg_type == "SS" || msg_type == "SU" || 
         msg_type == "PC" || msg_type == "PD" || msg_type == "PB") {
@@ -65,6 +65,10 @@ std::tuple<int, std::string, std::string> recv_message(int sock) {
 
 bool send_message(int sock, const std::string &data) {
     if (sock == -1) return false;
+
+    //sending to the same socket at the same time is not allowed valgrind gives errors
+    static std::mutex socket_locks[1024];
+    std::lock_guard<std::mutex> lock(socket_locks[sock % 1024]);
 
     size_t total_sent = 0;
     size_t data_len = data.size();
