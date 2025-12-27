@@ -42,7 +42,7 @@ void handle_client(int client_socket){
     Client client;
 
     //CLIENT OPERATIONS
-    while(true){
+    while(running){
         
         //CHECK WHAT MESSAGE IS BEING SENT
         char buffer[8192] = {};     //TODO: HOW BIG BUFFER (PROTOCOL ALLOWS CONTENT TO BE 4GB)
@@ -86,6 +86,7 @@ void handle_client(int client_socket){
             if(msg_type == "LO"){
                 client.socket = client_socket;
                 client = get_client_id(client, msg_content);
+                send_single_queue_list(client);
             }
             else{
                 if(!send_message(client.socket, prepare_message("LO","ER:FIRST YOU MUST LOG IN"))){
@@ -192,8 +193,6 @@ int main(int argc, char  **argv){
         clients.clear();
     }
 
-    shutdown(listening_socket, SHUT_RDWR);
-    close(listening_socket);
     std::cout << "Server cleanup complete\n"; //TODO: recv error: Bad file descriptor \n recv error: Bad file descriptor
 
     return 0;
