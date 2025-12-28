@@ -6,10 +6,8 @@
 #include <algorithm>
 
 
-std::vector<Queue>::iterator find_queue_by_name(const std::string& queue_name) {
-    return std::find_if(Existing_Queues.begin(), Existing_Queues.end(), 
-        [&queue_name](const Queue& q){return q.name == queue_name;
-        });
+std::unordered_map<std::string, Queue>::iterator find_queue_by_name(const std::string& queue_name) {
+    return Existing_Queues.find(queue_name);
 }
 
 bool is_client_subscribed(const Queue& queue, const std::string& client_id) {
@@ -39,7 +37,7 @@ std::string construct_queue_list(){
         uint32_t queues_count = htonl(static_cast<uint32_t>(Existing_Queues.size()));
         internal_data.append(reinterpret_cast<const char*>(&queues_count), 4);
 
-        for (const auto& q : Existing_Queues) {
+        for (const auto& [name, q] : Existing_Queues) {
             // For every queue: name lenght(4b):Name
             uint32_t n_len = htonl(static_cast<uint32_t>(q.name.length()));
             internal_data.append(reinterpret_cast<const char*>(&n_len), 4);
@@ -138,10 +136,10 @@ void send_messages_to_new_subscriber(Client client, std::string queue_name) {
         internal_data.append(reinterpret_cast<const char*>(&n_len), 4);
         internal_data.append(queue_name);
 
-        auto msg_it = it->messages.begin();
-        while (msg_it != it->messages.end()) {
+        auto msg_it = it->second.messages.begin();
+        while (msg_it != it->second.messages.end()) {
             if (msg_it->expire <= now) {
-                msg_it = it->messages.erase(msg_it);
+                msg_it = it->second.messages.erase(msg_it);
             } else {
                 debug_count++; //CZEMU SIE BUGUJE BEZ TEGO COS ????
                 has_messages = true;
@@ -191,8 +189,8 @@ void subscribe_to_queue(Client client, std::string queue_name) {
         auto it = find_queue_by_name(queue_name);
         
         if (it != Existing_Queues.end()) {
-            if(!is_client_subscribed(*it, client.id)){
-                it->subscribers.push_back(client.id);
+            if(!is_client_subscribed(it->second, client.id)){
+                it->second.subscribers.push_back(client.id);
                 valid_op = true;
             }
             else{
@@ -234,9 +232,9 @@ void unsubscribe_from_queue(Client client, std::string queue_name) {
         auto it = find_queue_by_name(queue_name);
         
         if (it != Existing_Queues.end()) {
-            auto sub_it = find_subscriber(*it, client.id);
-            if(sub_it != it->subscribers.end()){
-                it->subscribers.erase(sub_it);
+            auto sub_it = find_subscriber(it->second, client.id);
+            if(sub_it != it->second.subscribers.end()){
+                it->second.subscribers.erase(sub_it);
                 valid_op = true;
             }
             else{
@@ -277,7 +275,7 @@ void create_queue(Client client, const std::string queue_name) {
 
         if (it == Existing_Queues.end()) {
             new_queue.name = queue_name;
-            Existing_Queues.push_back(new_queue);
+            Existing_Queues[queue_name] = new_queue;
             valid_op = true;
         }
     }
@@ -308,7 +306,7 @@ void delete_queue(Client client, std::string queue_name) {
         auto it = find_queue_by_name(queue_name);
         
         if (it != Existing_Queues.end()) {
-            ids = it->subscribers;
+            ids = it->second.subscribers;
             Existing_Queues.erase(it);
             valid_op = true;
         }
@@ -369,10 +367,10 @@ void publish_message_to_queue(Client client, std::string content) {
         auto it = find_queue_by_name(queue_name);
 
         if (it != Existing_Queues.end()) {
-            it->messages.push_back({message_body,msg_expire});
+            it->second.messages.push_back({message_body,msg_expire});
             
             std::lock_guard<std::mutex> lock_c(clients_mutex);
-            for (const std::string& sub_id : it->subscribers) {
+            for (const std::string& sub_id : it->second.subscribers) {
                 if (clients.count(sub_id)) {
                     if(clients[sub_id].socket != -1){
                         subscribers_sockets.push_back(clients[sub_id].socket);

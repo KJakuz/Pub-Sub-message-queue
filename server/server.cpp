@@ -14,6 +14,7 @@
 #include <tuple>
 #include <unistd.h>
 #include <netdb.h>
+#include <algorithm>
 
 std::atomic<bool> running(true);
 std::atomic<int> listening_socket_global(-1);
@@ -22,7 +23,7 @@ std::mutex clients_mutex;
 std::mutex queues_mutex;
 std::mutex log_mutex;
 std::unordered_map<std::string, Client> clients;
-std::vector<Queue> Existing_Queues;
+std::unordered_map<std::string, Queue> Existing_Queues;
 
 
 void safe_print(const std::string& msg) {
@@ -62,7 +63,7 @@ void cleanup_worker() {
         //messages cleanup
         {
             std::lock_guard<std::mutex> lock(queues_mutex);
-            for (auto& queue : Existing_Queues) {
+            for (auto& [name, queue] : Existing_Queues) {
                 auto& msgs = queue.messages;
                 msgs.erase(
                     std::remove_if(msgs.begin(), msgs.end(),

@@ -4,7 +4,7 @@
 #include "common.h"
 #include "protocol_handler.h"
 
-std::vector<Queue>::iterator find_queue_by_name(const std::string& queue_name);
+std::unordered_map<std::string, Queue>::iterator find_queue_by_name(const std::string& queue_name);
 bool is_client_subscribed(const Queue& queue, const std::string& client_id);
 std::vector<std::string>::iterator find_subscriber(Queue& queue, const std::string& client_id);
 bool queue_exists(const std::string& queue_name);
@@ -27,7 +27,7 @@ void send_messages_to_new_subscriber(Client client, std::string queue_name); //S
 
 extern std::mutex clients_mutex;
 extern std::mutex queues_mutex;
-extern std::vector<Queue> Existing_Queues; 
+extern std::unordered_map<std::string, Queue> Existing_Queues; 
 
 #endif
 
