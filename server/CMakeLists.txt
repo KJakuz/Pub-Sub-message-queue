@@ -5,18 +5,21 @@ project(PubSubServer)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Header search path
+include_directories(include)
+
 set(SOURCE_FILES
-    server.cpp
-    message_operations.cpp
-    client_operations.cpp
-    protocol_handler.cpp
+    src/server.cpp
+    src/message_operations.cpp
+    src/client_operations.cpp
+    src/protocol_handler.cpp
 )
 
 set(HEADER_FILES
-    common.h
-    message_operations.h
-    client_operations.h
-    protocol_handler.h
+    include/common.h
+    include/message_operations.h
+    include/client_operations.h
+    include/protocol_handler.h
 )
 
 add_executable(server_app ${SOURCE_FILES} ${HEADER_FILES})

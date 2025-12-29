@@ -50,7 +50,7 @@ std::string construct_queue_list(){
     return packet;
 }
 
-void broadcast_queue_list(){
+void broadcast_queues_list(){
     /*
     SENDING MESSAGE THAT LOOKS LIKE THIS: 
     [TYPE(2b)] [CONTENT_SIZE(4b)] [NUMBER_OF_QUEUES(4b)] [QUEUE1_NAME_SIZE(4b)] [QUEUE1_NAME(n)] [QUEUEX_NAME_SIZE(4b)] [QUEUEX_NAME(n)] 
@@ -123,7 +123,7 @@ void send_messages_to_new_subscriber(Client client, std::string queue_name) {
     std::string internal_data;
     bool exists = false;
     bool has_messages = false;
-    int debug_count = 0;
+    //int debug_count = 0;
 
     {
     std::lock_guard<std::mutex> lock(queues_mutex);
@@ -141,7 +141,7 @@ void send_messages_to_new_subscriber(Client client, std::string queue_name) {
             if (msg_it->expire <= now) {
                 msg_it = it->second.messages.erase(msg_it);
             } else {
-                debug_count++; //CZEMU SIE BUGUJE BEZ TEGO COS ????
+                //debug_count++; 
                 has_messages = true;
                 uint32_t m_len = htonl(static_cast<uint32_t>(msg_it->text.length()));
                 internal_data.append(reinterpret_cast<const char*>(&m_len), 4);
@@ -154,7 +154,7 @@ void send_messages_to_new_subscriber(Client client, std::string queue_name) {
 
     if (!exists || !has_messages) return;
 
-    safe_print("Queue: " + queue_name + " | Messages to send: " + std::to_string(debug_count));
+    safe_print("Queue: " + queue_name + " | Messages to send: " + std::to_string(internal_data.size()));
 
     std::string full_packet = prepare_message("MA", internal_data);
     if(!send_message(client.socket, full_packet)){
@@ -284,7 +284,7 @@ void create_queue(Client client, const std::string queue_name) {
         if(!send_message(client.socket, prepare_message("PC","OK"))){
             safe_error("SEND_ERROR: PC:OK to " + client.id);
         }
-        broadcast_queue_list();
+        broadcast_queues_list();
     }
     else{
         safe_print("cant create queue: " + queue_name);
@@ -320,7 +320,7 @@ void delete_queue(Client client, std::string queue_name) {
         }
         
         notify_after_delete(ids, queue_name);
-        broadcast_queue_list();
+        broadcast_queues_list();
     } else {
         safe_print("Cannot delete queue: " + queue_name + " (not found)");
         std::string msg = prepare_message("PD","ER:NO_QUEUE");
