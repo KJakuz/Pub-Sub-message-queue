@@ -2,68 +2,118 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <sstream>
+#include <thread>
 
-// Pomocnicza funkcja do dzielenia wpisanego tekstu na słowa
-std::vector<std::string> split(const std::string &s)
+void print_help()
 {
-    std::vector<std::string> tokens;
-    std::string token;
-    std::istringstream tokenStream(s);
-    while (std::getline(tokenStream, token, ' '))
-        tokens.push_back(token);
-    return tokens;
+    std::cout << "\n--- Commands ---\n"
+              << "list          - Show local cache of available queues\n"
+              << "create [name] - Create a new queue\n"
+              << "sub [name]    - Subscribe to a queue\n"
+              << "unsub [name]  - Unsubscribe from a queue\n"
+              << "pub [q] [msg] - Publish a message\n"
+              << "delete [name] - Delete a queue\n"
+              << "exit          - Quit\n"
+              << "----------------\n";
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    MessageQueueClient client;
-
-    std::cout << "--- Łączenie z serwerem... ---" << std::endl;
-    if (!client.connect_to_server("127.0.0.1", "5555", 2137))
+    if (argc < 4)
     {
-        std::cerr << "Błąd: Nie można połączyć się z serwerem!" << std::endl;
+        std::cout << "Usage: " << argv[0] << " <host> <port> <username>\n";
         return 1;
     }
 
-    std::cout << "Połączono! Dostępne komendy: " << std::endl;
-    std::cout << "  create <nazwa>" << std::endl;
-    std::cout << "  delete <nazwa>" << std::endl;
-    std::cout << "  publish <nazwa> <wiadomość> <ttl>" << std::endl;
-    std::cout << "  exit" << std::endl;
+    std::string host = argv[1];
+    std::string port = argv[2];
+    std::string user = argv[3];
 
-    std::string input;
-    while (true)
+    MessageQueueClient client(user);
+
+    std::cout << "Connecting to " << host << ":" << port << " as " << user << "...\n";
+    if (!client.connect_to_server(host, port))
     {
-        std::cout << "\n> ";
-        if (!std::getline(std::cin, input) || input == "exit")
+        std::cerr << "Failed to connect/login!\n";
+        return 1;
+    }
+
+    std::thread ui_thread([&client]()
+                          {
+        while (true) {
+            MessageQueueClient::Event ev;
+            if (client.poll_event(ev)) {
+                switch (ev.type) {
+                    case MessageQueueClient::Event::Type::Message:
+                        std::cout << "\n[NEW MESSAGE] Queue: " << ev.queue << " | Content: " << ev.message << "\n> " << std::flush;
+                        break;
+                    case MessageQueueClient::Event::Type::BatchMessages:
+                        std::cout << "\n[HISTORY] Received " << ev.messages.size() << " past messages.\n> " << std::flush;
+                        for(const auto& m : ev.messages) std::cout << "  - " << m << "\n";
+                        break;
+                    case MessageQueueClient::Event::Type::QueueList:
+                        std::cout << "\n[SERVER] Queue List Updated. Total: " << ev.queues.size() << "\n> " << std::flush;
+                        break;
+                    case MessageQueueClient::Event::Type::StatusUpdate:
+                        std::cout << "\n[OK] " << ev.message << "\n> " << std::flush;
+                        break;
+                    case MessageQueueClient::Event::Type::Error:
+                        std::cerr << "\n[SERVER ERROR] " << ev.message << "\n> " << std::flush;
+                        break;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } });
+    ui_thread.detach();
+
+    print_help();
+
+    std::string line;
+    while (std::cout << "> " && std::getline(std::cin, line))
+    {
+        if (line == "exit")
             break;
-
-        auto args = split(input);
-        if (args.empty())
+        if (line == "list")
+        {
+            auto q_list = client.get_available_queues();
+            std::cout << "Cached Queues: ";
+            for (auto &q : q_list)
+                std::cout << "[" << q << "] ";
+            std::cout << std::endl;
             continue;
+        }
 
-        if (args[0] == "create" && args.size() > 1)
+        size_t first_space = line.find(' ');
+        std::string cmd = line.substr(0, first_space);
+
+        if (cmd == "create" && first_space != std::string::npos)
         {
-            client.create_queue(args[1]);
+            client.create_queue(line.substr(first_space + 1));
         }
-        else if (args[0] == "delete" && args.size() > 1)
+        else if (cmd == "sub" && first_space != std::string::npos)
         {
-            client.delete_queue(args[1]);
+            client.subscribe(line.substr(first_space + 1));
         }
-        else if (args[0] == "publish" && args.size() > 3)
+        else if (cmd == "unsub" && first_space != std::string::npos)
         {
-            // publish nazwa_kolejki tresc_wiadomosci ttl
-            uint32_t ttl = std::stoul(args[3]);
-            client.publish(args[1], args[2]);
+            client.unsubscribe(line.substr(first_space + 1));
         }
-        else
+        else if (cmd == "pub")
         {
-            std::cout << "Nieznana komenda lub za mało argumentów." << std::endl;
+            size_t second_space = line.find(' ', first_space + 1);
+            if (second_space != std::string::npos)
+            {
+                std::string q_name = line.substr(first_space + 1, second_space - first_space - 1);
+                std::string content = line.substr(second_space + 1);
+                client.publish(q_name, content);
+            }
+        }
+        else if (cmd == "delete" && first_space != std::string::npos)
+        {
+            client.delete_queue(line.substr(first_space + 1));
         }
     }
 
     client.disconnect();
-    std::cout << "Rozłączono." << std::endl;
     return 0;
 }

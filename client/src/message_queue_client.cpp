@@ -1,15 +1,17 @@
 #include "MessageQueueClient.h"
 #include "Protocol.h"
-#include <string>
+
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+
+#include <string>
 #include <unistd.h>
 #include <iostream>
 #include <thread>
 #include <vector>
 
-bool MessageQueueClient::connect_to_server(const std::string &host, const std::string &port, const int &client_id) {
+bool MessageQueueClient::connect_to_server(const std::string &host, const std::string &port) {
     addrinfo hints{ .ai_family = AF_INET, .ai_socktype = SOCK_STREAM, .ai_protocol = IPPROTO_TCP }, *res{};
     if (int err = getaddrinfo(host.c_str(), port.c_str(), &hints, &res)) {
         std::cerr << gai_strerror(err) << std::endl;
@@ -24,9 +26,9 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
     }
     freeaddrinfo(res);
     if (_verify_connection()) {
-        std::cout << "Connected: " << host.c_str() << ":" << port.c_str() << std::endl;
         _connected = true;
         _receiver_thread = std::thread(&MessageQueueClient::_receiver_loop, this);
+        std::cout << "Connected" << std::endl;
         return true;
     }
 
@@ -115,44 +117,82 @@ void MessageQueueClient::_receiver_loop() {
     while (_connected) {
         if (!read_exactly(_socket, header_buffer, 6))
         {
-            std::cout << "Połączenie zamknięte przez serwer.\n";
-            _connected = false;
+            _connected.store(false);
             break;
         }
-        std::string header_str(header_buffer, 6);
-        auto [role, cmd, payload_len] = Protocol::_decode_packet(header_str);
+        auto [role, cmd, payload_len] = Protocol::_decode_packet(std::string(header_buffer, 6));
 
-        std::string full_payload = "";
+        std::string payload;
         if (payload_len > 0)
         {
-            std::vector<char> payload_buffer(payload_len);
-            // todo read_exactly?
-            ssize_t received_data = recv(_socket, payload_buffer.data(), payload_len, 0);
-
-            if (received_data > 0)
+            payload.resize(payload_len);
+            if (!read_exactly(_socket, payload.data(), payload_len))
             {
-                full_payload.assign(payload_buffer.begin(), payload_buffer.begin() + received_data);
+                _connected.store(false);
+                break;
             }
         }
 
         // HANDLING GIVEN MESSAGE TYPES
+        Event ev{};
 
         if (role == 'I' && cmd == 'N')
         {
-            _available_queues = _handle_queue_list_payload(full_payload);
-            for (auto queue : _available_queues) {
-                std::cout << "Kolejka dostepna: " << queue <<std::endl;
-            }
+            ev.type = Event::Type::QueueList;
+            ev.queues = _handle_queue_list_payload(payload);
         }
         else if (role == 'M' && cmd == 'S')
         {
-            auto [q_name, content] = _handle_message_payload(full_payload);
-            std::cout << "Wiadomosc: " << q_name << ", " << content << std::endl;
+            ev.type = Event::Type::Message;
+            auto [q, msg] = _handle_message_payload(payload);
+            ev.queue = q;
+            ev.message = msg;
         }
         else if (role == 'M' && cmd == 'A')
         {
-            auto messages_for_queues = _handle_new_sub_messages(full_payload);
+            ev.type = Event::Type::BatchMessages;
+            ev.messages = _handle_new_sub_messages(payload);
         }
+        else if (role == 'L' && cmd == 'O') {
+            if (payload.find("ER:") == 0) {
+                ev.type = Event::Type::Error;
+                ev.message = payload;
+            }
+        }
+        else if (role == 'Q' && cmd == 'L') {
+            auto list = _handle_queue_list_payload(payload);
+            {
+                std::lock_guard<std::mutex> lock(_queues_cache_mutex);
+                _available_queues = list;
+            }
+            ev.type = Event::Type::QueueList;
+            ev.queues = list;
+        }
+        else if ((role == 'S' && (cmd == 'S' || cmd == 'U')) || (role == 'P' && (cmd == 'C' || cmd == 'D' || cmd == 'B'))) {
+            if (payload.find("ER:") == 0)
+            {
+                ev.type = Event::Type::Error;
+                ev.message = "Cmd " + std::string(1, role) + std::string(1, cmd) + " Failed: " + payload;
+            }
+            else
+            {
+                ev.type = Event::Type::StatusUpdate;
+                ev.message = std::string(1, role) + std::string(1, cmd) + " Success";
+            }
+        }
+        else if (role == 'N' && cmd == 'D')
+        {
+            ev.type = Event::Type::Error;
+            ev.message = "Queue Deleted: " + payload;
+        }
+
+        if (ev.type != Event::Type::Disconnected)
+        {
+            std::lock_guard<std::mutex> lock(_event_mutex);
+            _event_queue.push(std::move(ev));
+            _event_cv.notify_one();
+        }
+
     }
 }
 
@@ -227,7 +267,7 @@ MessageQueueClient::~MessageQueueClient() {
 }
 
 bool MessageQueueClient::_verify_connection() {
-    std::string login_msg = Protocol::prepare_message('L', 'I', _client_login); 
+    std::string login_msg = Protocol::prepare_message('L', 'O', _client_login); 
     if(!send_message(_socket, login_msg)) return false;
 
     char header[6];
@@ -252,14 +292,12 @@ bool MessageQueueClient::_verify_connection() {
 }
 
 std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std::string &payload) {
-    if (payload.size() < 4) return;
     size_t offset = 0;
     uint32_t  q_name_len_net;
     std::memcpy(&q_name_len_net, payload.data() + offset, 4);
     uint32_t q_name_len = ntohl(q_name_len_net);
     offset += 4;
 
-    if (offset + q_name_len > payload.size()) return;
     std::string queue_name = payload.substr(offset, q_name_len);
     offset += q_name_len;
 
@@ -280,4 +318,14 @@ std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std:
     }
 
     return messages;
+}
+
+bool MessageQueueClient::poll_event(Event &ev)
+{
+    std::lock_guard<std::mutex> lock(_event_mutex);
+    if (_event_queue.empty())
+        return false;
+    ev = std::move(_event_queue.front());
+    _event_queue.pop();
+    return true;
 }
