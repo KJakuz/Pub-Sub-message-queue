@@ -4,7 +4,7 @@
 Client get_client_id(Client client, std::string& id) {
     if (id.length() < 2) {
         if(!send_message(client.socket, prepare_message("LO", "ER:ID_TOO_SHORT"))){
-            std::cerr << "SEND_ERROR: LO:ER to socket:" << client.socket << "\n";
+            safe_error("SEND_ERROR: LO:ER to socket:" + std::to_string(client.socket));
         }
         client.id = "";
         return client;
@@ -24,7 +24,7 @@ Client get_client_id(Client client, std::string& id) {
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.disconnect_time).count();
                 
                 if (elapsed >= SECONDS_TO_CLEAR_CLIENT) {
-                    for (auto& queue : Existing_Queues) {
+                    for (auto& [name, queue] : Existing_Queues) {
                         auto sub_it = std::find(queue.subscribers.begin(), 
                                                queue.subscribers.end(), id);
                         if (sub_it != queue.subscribers.end()) {
@@ -54,7 +54,7 @@ Client get_client_id(Client client, std::string& id) {
     
     if (id_active) {
         if(!send_message(client.socket, prepare_message("LO", "ER:ID_TAKEN"))){
-            std::cerr << "SEND_ERROR: LO:ER to socket:" << client.socket << "\n";
+            safe_error("SEND_ERROR: LO:ER to socket:" + std::to_string(client.socket));
         }
         client.id = "";
         return client;
@@ -62,14 +62,14 @@ Client get_client_id(Client client, std::string& id) {
     
     if (reconnected) {
         if(!send_message(client.socket, prepare_message("LO", "OK:RECONNECTED"))){
-            std::cerr << "SEND_ERROR: LO:OK to " << client.id << "\n";
+            safe_error("SEND_ERROR: LO:OK to " + client.id);
         }
-        std::cout << "Client " << client.id << " reconnected\n";
+        safe_print("Client " + client.id + " reconnected");
     } else {
         if(!send_message(client.socket, prepare_message("LO", "OK:LOGGED"))){
-            std::cerr << "SEND_ERROR: LO:OK to " << client.id << "\n";
+            safe_error("SEND_ERROR: LO:OK to " + client.id);
         }
-        std::cout << "Client " << client.id << " connected\n";
+        safe_print("Client " + client.id + " connected");
     }
     
     return client;
