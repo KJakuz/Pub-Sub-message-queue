@@ -39,7 +39,7 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
 
 void MessageQueueClient::disconnect() {
     if (_socket != -1) {
-        _connected = false;
+        // _connected = false;
         shutdown(_socket, SHUT_RDWR);
         if (_receiver_thread.joinable()) _receiver_thread.join();
         close(_socket);
@@ -115,9 +115,16 @@ bool MessageQueueClient::read_exactly(int sock, char *buffer, size_t size) {
 void MessageQueueClient::_receiver_loop() {
     char header_buffer[6];
     while (_connected) {
+        Event ev{};
         if (!read_exactly(_socket, header_buffer, 6))
         {
             _connected.store(false);
+            ev.type = Event::Type::Disconnected;
+            {
+                std::lock_guard<std::mutex> lock(_event_mutex);
+                _event_queue.push(ev);
+                _event_cv.notify_one();
+            }
             break;
         }
         auto [role, cmd, payload_len] = Protocol::_decode_packet(std::string(header_buffer, 6));
@@ -134,7 +141,7 @@ void MessageQueueClient::_receiver_loop() {
         }
 
         // HANDLING GIVEN MESSAGE TYPES
-        Event ev{};
+        
 
         if (role == 'I' && cmd == 'N')
         {
@@ -192,7 +199,6 @@ void MessageQueueClient::_receiver_loop() {
             _event_queue.push(std::move(ev));
             _event_cv.notify_one();
         }
-
     }
 }
 

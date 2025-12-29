@@ -18,7 +18,7 @@ std::string Protocol::_pack_publish_data(const std::string &queue_name, const st
     uint32_t len_q = htonl(queue_name.size());
     internal_payload.append(reinterpret_cast<const char *>(&len_q), sizeof(len_q));
     uint32_t len_ttl = htonl(ttl);
-    internal_payload.append(reinterpret_cast<const char *>(&len_ttl), sizeof(len_ttl    ));
+    internal_payload.append(reinterpret_cast<const char *>(&len_ttl), sizeof(len_ttl));
 
     internal_payload += queue_name;
     internal_payload += content;

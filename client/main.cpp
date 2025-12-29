@@ -60,6 +60,9 @@ int main(int argc, char *argv[])
                     case MessageQueueClient::Event::Type::Error:
                         std::cerr << "\n[SERVER ERROR] " << ev.message << "\n> " << std::flush;
                         break;
+                    case MessageQueueClient::Event::Type::Disconnected:
+                        std::cout << "\n[DISCONNECTED FROM SERVER].\n";
+                        exit(0);
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));

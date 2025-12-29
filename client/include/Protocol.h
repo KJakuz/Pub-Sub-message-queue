@@ -1,7 +1,8 @@
 #pragma once
 
-#include <string>
 #include "MessageQueueClient.h"
+
+#include <string>
 
 const int PACKET_LENGTH = 6;
 inline std::map<std::string, char> ClientMode = {
@@ -11,7 +12,7 @@ inline std::map<std::string, char> ClientMode = {
 inline std::map<std::string, char> ClientActions = {
     {"CREATE_QUEUE", 'C'},
     {"DELETE_QUEUE", 'D'},
-    {"PUBLISH", 'P'},
+    {"PUBLISH", 'B'},
     {"SUBSCRIBE", 'S'},
     {"UNSUBSCRIBE", 'U'}};
 
