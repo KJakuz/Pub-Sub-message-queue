@@ -4,12 +4,13 @@
 
 #include <string>
 
-const int PACKET_LENGTH = 6;
-inline std::map<std::string, char> ClientMode = {
+constexpr size_t HEADER_PACKET_SIZE = 6;
+
+inline std::map<std::string, char> client_role_map = {
     {"PUBLISHER", 'P'},
     {"SUBSCRIBER", 'S'}};
 
-inline std::map<std::string, char> ClientActions = {
+inline std::map<std::string, char> client_action_map = {
     {"CREATE_QUEUE", 'C'},
     {"DELETE_QUEUE", 'D'},
     {"PUBLISH", 'B'},

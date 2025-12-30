@@ -13,8 +13,7 @@ class MessageQueueClient {
 public:
     struct Event
     {
-        enum class Type
-        {
+        enum class Type {
             QueueList,
             Message,
             BatchMessages,
@@ -32,7 +31,7 @@ public:
     MessageQueueClient();
     MessageQueueClient(const std::string &client_login);
     ~MessageQueueClient();
-
+    // TODO: SPlit logic between separate classes
     // Connection
     bool connect_to_server(const std::string &host, const std::string &port);
     void disconnect();

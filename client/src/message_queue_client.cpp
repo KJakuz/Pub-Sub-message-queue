@@ -25,21 +25,18 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
         return false;
     }
     freeaddrinfo(res);
-    if (_verify_connection()) {
-        _connected = true;
-        _receiver_thread = std::thread(&MessageQueueClient::_receiver_loop, this);
-        std::cout << "Connected" << std::endl;
-        return true;
+    if (!_verify_connection()) {
+        close(_socket);
+        _socket = -1;
+        return false;
     }
-
-    close(_socket);
-    _socket = -1;
-    return false;
+    _connected.store(true);
+    _receiver_thread = std::thread(&MessageQueueClient::_receiver_loop, this);
+    return true;
 }
 
 void MessageQueueClient::disconnect() {
     if (_socket != -1) {
-        // _connected = false;
         shutdown(_socket, SHUT_RDWR);
         if (_receiver_thread.joinable()) _receiver_thread.join();
         close(_socket);
@@ -48,37 +45,37 @@ void MessageQueueClient::disconnect() {
 }
 
 bool MessageQueueClient::create_queue(const std::string &queue_name) {
-    char mode = ClientMode["PUBLISHER"];
-    char action = ClientActions["CREATE_QUEUE"];
+    char mode = client_role_map["PUBLISHER"];
+    char action = client_action_map["CREATE_QUEUE"];
     std::string message = Protocol::prepare_message(mode, action, queue_name);
     return MessageQueueClient::send_message(_socket, message);
 }
 
 bool MessageQueueClient::delete_queue(const std::string &queue_name) {
-    char mode = ClientMode["PUBLISHER"];
-    char action = ClientActions["DELETE_QUEUE"];
+    char mode = client_role_map["PUBLISHER"];
+    char action = client_action_map["DELETE_QUEUE"];
     std::string message = Protocol::prepare_message(mode, action, queue_name);
     return MessageQueueClient::send_message(_socket, message);
 }
 
 bool MessageQueueClient::publish(const std::string &queue_name, std::string &content) {
-    char mode = ClientMode["PUBLISHER"];
-    char action = ClientActions["PUBLISH"];
+    char mode = client_role_map["PUBLISHER"];
+    char action = client_action_map["PUBLISH"];
     std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, 3600);
     std::string message = Protocol::prepare_message(mode, action, internal_payload);
     return MessageQueueClient::send_message(_socket, message);
 }
 
 bool MessageQueueClient::subscribe(const std::string &queue_name) {
-    char mode = ClientMode["SUBSCRIBER"];
-    char action = ClientActions["SUBSCRIBE"];
+    char mode = client_role_map["SUBSCRIBER"];
+    char action = client_action_map["SUBSCRIBE"];
     std::string message = Protocol::prepare_message(mode, action, queue_name);
     return MessageQueueClient::send_message(_socket, message);
 }
 
 bool MessageQueueClient::unsubscribe(const std::string &queue_name) {
-    char mode = ClientMode["SUBSCRIBER"];
-    char action = ClientActions["UNSUBSCRIBE"];
+    char mode = client_role_map["SUBSCRIBER"];
+    char action = client_action_map["UNSUBSCRIBE"];
     std::string message = Protocol::prepare_message(mode, action, queue_name);
     return MessageQueueClient::send_message(_socket, message);
 }
@@ -113,10 +110,10 @@ bool MessageQueueClient::read_exactly(int sock, char *buffer, size_t size) {
 }
 
 void MessageQueueClient::_receiver_loop() {
-    char header_buffer[6];
+    char header_buffer[HEADER_PACKET_SIZE];
     while (_connected) {
         Event ev{};
-        if (!read_exactly(_socket, header_buffer, 6))
+        if (!read_exactly(_socket, header_buffer, HEADER_PACKET_SIZE))
         {
             _connected.store(false);
             ev.type = Event::Type::Disconnected;
@@ -127,7 +124,7 @@ void MessageQueueClient::_receiver_loop() {
             }
             break;
         }
-        auto [role, cmd, payload_len] = Protocol::_decode_packet(std::string(header_buffer, 6));
+        auto [role, cmd, payload_len] = Protocol::_decode_packet(std::string(header_buffer, HEADER_PACKET_SIZE));
 
         std::string payload;
         if (payload_len > 0)
@@ -141,8 +138,6 @@ void MessageQueueClient::_receiver_loop() {
         }
 
         // HANDLING GIVEN MESSAGE TYPES
-        
-
         if (role == 'I' && cmd == 'N')
         {
             ev.type = Event::Type::QueueList;
@@ -201,6 +196,7 @@ void MessageQueueClient::_receiver_loop() {
         }
     }
 }
+
 
 std::tuple<std::string, std::string> MessageQueueClient::_handle_message_payload(const std::string &payload) {
     if (payload.size() < 4) {
@@ -326,8 +322,7 @@ std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std:
     return messages;
 }
 
-bool MessageQueueClient::poll_event(Event &ev)
-{
+bool MessageQueueClient::poll_event(Event &ev) {
     std::lock_guard<std::mutex> lock(_event_mutex);
     if (_event_queue.empty())
         return false;
