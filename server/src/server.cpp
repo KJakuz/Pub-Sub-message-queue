@@ -37,13 +37,21 @@ void safe_error(const std::string& msg) {
 }
 
 void cleanup_worker() {
+    int heartbeat_counter = 0;
     while (running) {
-        std::this_thread::sleep_for(std::chrono::seconds(3));
+
+        std::this_thread::sleep_for(std::chrono::seconds(1));
         if (!running) break;
         
+        heartbeat_counter++;
+        if (heartbeat_counter >= HEARTBEAT_INTERVAL) {
+            heartbeat_counter = 0;   
+        }
+
         auto now = std::chrono::steady_clock::now();
-        
-        //clients cleanup
+        std::vector<int> alive_sockets;
+
+        //clients cleanup and getting alive sockets
         {
             std::lock_guard<std::mutex> lock(clients_mutex);
             for (auto it = clients.begin(); it != clients.end(); ) {
@@ -55,6 +63,9 @@ void cleanup_worker() {
                         it = clients.erase(it);
                         continue;
                     }
+                }
+                else{
+                    alive_sockets.push_back(it->second.socket);
                 }
                 ++it;
             }
@@ -71,6 +82,10 @@ void cleanup_worker() {
                     msgs.end()
                 );
             }
+        }
+    //send heartbeat to alive clients
+        for (int socket : alive_sockets) {
+            send_message(socket, prepare_message("HB", ""));
         }
     }
 }
@@ -135,7 +150,10 @@ void handle_client(int client_socket){
         }
         else
         {
-            if(msg_type == "SS"){
+            if(msg_type == "HB"){
+                continue;
+            }
+            else if(msg_type == "SS"){
                 subscribe_to_queue(client, msg_content);
             }
             else if(msg_type == "SU"){

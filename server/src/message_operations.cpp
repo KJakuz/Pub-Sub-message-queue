@@ -123,7 +123,6 @@ void send_messages_to_new_subscriber(Client client, std::string queue_name) {
     std::string internal_data;
     bool exists = false;
     bool has_messages = false;
-    //int debug_count = 0;
 
     {
     std::lock_guard<std::mutex> lock(queues_mutex);
@@ -141,7 +140,6 @@ void send_messages_to_new_subscriber(Client client, std::string queue_name) {
             if (msg_it->expire <= now) {
                 msg_it = it->second.messages.erase(msg_it);
             } else {
-                //debug_count++; 
                 has_messages = true;
                 uint32_t m_len = htonl(static_cast<uint32_t>(msg_it->text.length()));
                 internal_data.append(reinterpret_cast<const char*>(&m_len), 4);
@@ -392,8 +390,9 @@ void publish_message_to_queue(Client client, std::string content) {
             temp_client.socket = sub_sock;
             send_published_message(temp_client, queue_name, message_body);
         }
-        
-        safe_print("DEBUG: Published to " + queue_name + " for " + std::to_string(subscribers_sockets.size()) + " subs.");
+        if (DEBUG == 1){
+            safe_print("DEBUG: Published to " + queue_name + " for " + std::to_string(subscribers_sockets.size()) + " subs.");
+        }
     } 
     else {
         if(!send_message(client.socket, prepare_message("PB", "ER:NO_QUEUE"))){

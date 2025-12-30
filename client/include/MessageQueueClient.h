@@ -6,6 +6,9 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <atomic>
+#include <cstring>
+#include <arpa/inet.h>
 
 
 
@@ -19,7 +22,8 @@ public:
             BatchMessages,
             Disconnected,
             Error,
-            StatusUpdate
+            StatusUpdate,
+            PingPong
         };
         Type type;
         std::string queue;

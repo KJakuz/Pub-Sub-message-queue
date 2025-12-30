@@ -187,6 +187,11 @@ void MessageQueueClient::_receiver_loop() {
             ev.type = Event::Type::Error;
             ev.message = "Queue Deleted: " + payload;
         }
+        else if (role == 'H' && cmd == 'B') {
+            std::string heartbeat = Protocol::prepare_message('H', 'B', "");
+            send_message(_socket, heartbeat);
+            continue;
+        }
 
         if (ev.type != Event::Type::Disconnected)
         {

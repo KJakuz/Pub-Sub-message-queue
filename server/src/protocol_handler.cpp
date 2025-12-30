@@ -54,10 +54,12 @@ std::tuple<int, std::string, std::string> recv_message(int sock) {
         if (payload_result < 0) return {-1, "", ""};
     }
     
-    safe_print("DEBUG: TYPE: " + msg_type + " SIZE: " + std::to_string(payload_size) + " CONTENT: " + msg_content);
+    if (DEBUG == 1){
+        safe_print("DEBUG: TYPE: " + msg_type + " SIZE: " + std::to_string(payload_size) + " CONTENT: " + msg_content);
+    }
     
     if (msg_type == "LO" || msg_type == "SS" || msg_type == "SU" || 
-        msg_type == "PC" || msg_type == "PD" || msg_type == "PB") {
+        msg_type == "PC" || msg_type == "PD" || msg_type == "PB" || msg_type == "HB") {
         return {1, msg_type, msg_content};
     }
     return {-1, msg_type, msg_content};
