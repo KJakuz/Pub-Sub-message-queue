@@ -11,15 +11,22 @@
 #include <thread>
 #include <vector>
 
+std::mutex cout_mutex;
+
+void thread_safe_print(const std::string &msg) {
+    std::lock_guard<std::mutex> lock(cout_mutex);
+    std::cout << msg << std::endl;
+}
+
 bool MessageQueueClient::connect_to_server(const std::string &host, const std::string &port) {
     addrinfo hints{ .ai_family = AF_INET, .ai_socktype = SOCK_STREAM, .ai_protocol = IPPROTO_TCP }, *res{};
     if (int err = getaddrinfo(host.c_str(), port.c_str(), &hints, &res)) {
-        std::cerr << gai_strerror(err) << std::endl;
+        thread_safe_print(gai_strerror(err));
         return false;
     }
     _socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (connect(_socket, res->ai_addr, res->ai_addrlen) == -1) {
-        std::cerr << "Error with connect" << std::endl;
+        thread_safe_print("DEBUG: Error with connect");
         freeaddrinfo(res);
         close(_socket);
         return false;
@@ -58,10 +65,10 @@ bool MessageQueueClient::delete_queue(const std::string &queue_name) {
     return MessageQueueClient::send_message(_socket, message);
 }
 
-bool MessageQueueClient::publish(const std::string &queue_name, std::string &content) {
+bool MessageQueueClient::publish(const std::string &queue_name, std::string &content, size_t ttl) {
     char mode = client_role_map["PUBLISHER"];
     char action = client_action_map["PUBLISH"];
-    std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, 3600);
+    std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, ttl);
     std::string message = Protocol::prepare_message(mode, action, internal_payload);
     return MessageQueueClient::send_message(_socket, message);
 }
@@ -81,14 +88,12 @@ bool MessageQueueClient::unsubscribe(const std::string &queue_name) {
 }
 
 bool MessageQueueClient::send_message(int sock, const std::string &data) {
-    if (sock == -1) return false;
+    if (sock < 0) return false;
 
     size_t total_sent = 0;
-    size_t data_len = data.size();
-    const char *raw_data = data.data();
-
-    while (total_sent < data_len) {
-        ssize_t sent = send(sock, raw_data + total_sent, data_len - total_sent, 0);
+    while (total_sent < data.size()) {
+        ssize_t sent = send(sock, data.data() + total_sent, data.size() - total_sent, 0);
+        
         if (sent <= 0) { 
             return false;
         }
@@ -98,9 +103,10 @@ bool MessageQueueClient::send_message(int sock, const std::string &data) {
 }
 
 bool MessageQueueClient::read_exactly(int sock, char *buffer, size_t size) {
+    if (sock < 0) return false;
+
     size_t total_read = 0;
-    while (total_read < size)
-    {
+    while (total_read < size) {
         ssize_t received = recv(sock, buffer + total_read, size - total_read, 0);
         if (received <= 0)
             return false;
@@ -109,19 +115,24 @@ bool MessageQueueClient::read_exactly(int sock, char *buffer, size_t size) {
     return true;
 }
 
+void MessageQueueClient::_handle_disconnect()
+{
+    _connected.store(false);
+    Event ev{ .type=Event::Type::Disconnected };
+    std::lock_guard<std::mutex> lock(_event_mutex);
+    _event_queue.push(std::move(ev));
+    _event_cv.notify_one();
+}
+
 void MessageQueueClient::_receiver_loop() {
     char header_buffer[HEADER_PACKET_SIZE];
+    // const size_t MAX_PAYLOAD = 10 * 1024 * 1024;
+
     while (_connected) {
         Event ev{};
         if (!read_exactly(_socket, header_buffer, HEADER_PACKET_SIZE))
         {
-            _connected.store(false);
-            ev.type = Event::Type::Disconnected;
-            {
-                std::lock_guard<std::mutex> lock(_event_mutex);
-                _event_queue.push(ev);
-                _event_cv.notify_one();
-            }
+            _handle_disconnect();
             break;
         }
         auto [role, cmd, payload_len] = Protocol::_decode_packet(std::string(header_buffer, HEADER_PACKET_SIZE));
@@ -132,7 +143,7 @@ void MessageQueueClient::_receiver_loop() {
             payload.resize(payload_len);
             if (!read_exactly(_socket, payload.data(), payload_len))
             {
-                _connected.store(false);
+                _handle_disconnect();
                 break;
             }
         }
@@ -182,14 +193,12 @@ void MessageQueueClient::_receiver_loop() {
                 ev.message = std::string(1, role) + std::string(1, cmd) + " Success";
             }
         }
-        else if (role == 'N' && cmd == 'D')
-        {
+        else if (role == 'N' && cmd == 'D') {
             ev.type = Event::Type::Error;
             ev.message = "Queue Deleted: " + payload;
         }
 
-        if (ev.type != Event::Type::Disconnected)
-        {
+        if (ev.type != Event::Type::Disconnected) {
             std::lock_guard<std::mutex> lock(_event_mutex);
             _event_queue.push(std::move(ev));
             _event_cv.notify_one();
@@ -207,9 +216,8 @@ std::tuple<std::string, std::string> MessageQueueClient::_handle_message_payload
     std::memcpy(&q_name_size_net, payload.data(), sizeof(uint32_t));
     uint32_t q_name_size = ntohl(q_name_size_net);
 
-    if (4 + q_name_size > payload.size())
-    {
-        std::cerr << "Błąd: Rozmiar nazwy kolejki przekracza rozmiar danych!" << std::endl;
+    if (4 + q_name_size > payload.size()) {
+        thread_safe_print("DEBUG: Queue name exceeds data length.");
     }
 
     std::string queue_name = payload.substr(4, q_name_size);
@@ -280,17 +288,16 @@ bool MessageQueueClient::_verify_connection() {
     std::string payload;
     if (len > 0) {
         payload.resize(len);
-        if (!read_exactly(_socket, &payload[0], len)) return false;
-    } // maybe function for that?
+        if (!read_exactly(_socket, payload.data(), len)) return false;
+    }
 
     if (role == 'L' && cmd == 'O') {
-        std::cout << "Server accepted login: " << payload << std::endl;
+        thread_safe_print("DEBUG: Server accepted login: " + payload);
         return true;
     }
-    else {
-        std::cerr << "Login failed: " << payload << std::endl;
-        return false;
-    }
+
+    thread_safe_print("DEBUG: Login failed: " + payload);
+    return false;
 }
 
 std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std::string &payload) {

@@ -39,7 +39,7 @@ public:
     // Publisher
     bool create_queue(const std::string &queue_name);
     bool delete_queue(const std::string &queue_name);
-    bool publish(const std::string &queue_name, std::string &content);
+    bool publish(const std::string &queue_name, std::string &content, size_t ttl);
 
     // Subscriber
     bool subscribe(const std::string &queue_name);
@@ -75,5 +75,5 @@ private:
     std::vector<std::string> _handle_new_sub_messages(const std::string &payload);
 
     bool _verify_connection();
-
+    void _handle_disconnect();
 };
