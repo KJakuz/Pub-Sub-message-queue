@@ -38,8 +38,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    std::thread ui_thread([&client]()
-                          {
+        std::thread ui_thread([&client]() {
         while (true) {
             MessageQueueClient::Event ev;
             if (client.poll_event(ev)) {
@@ -65,7 +64,6 @@ int main(int argc, char *argv[])
                         exit(0);
                 }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         } });
     ui_thread.detach();
 

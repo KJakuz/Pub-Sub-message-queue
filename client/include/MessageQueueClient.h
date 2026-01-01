@@ -14,6 +14,9 @@
 
 class MessageQueueClient {
 public:
+
+    // Event is logical abstraction to deserialized server action.
+    // For convinience, types are defined as well as related queues or message that user can read.
     struct Event
     {
         enum class Type {
@@ -35,7 +38,7 @@ public:
     MessageQueueClient();
     MessageQueueClient(const std::string &client_login);
     ~MessageQueueClient();
-    // TODO: Split logic between separate classes
+
     // Connection
 
     bool connect_to_server(const std::string &host, const std::string &port);
@@ -65,7 +68,7 @@ private:
     std::string _client_login;
     std::thread _receiver_thread;
     std::atomic<bool> _connected{false};
-    // ? Should we make a queue size constraint if server sends a lot of msg in short time and user dont poll them?
+    
     std::queue<Event> _event_queue;
     std::mutex _event_mutex;
     std::condition_variable _event_cv;

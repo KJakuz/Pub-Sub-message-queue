@@ -366,10 +366,13 @@ std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std:
     return messages;
 }
 
+// Poll event returned from server.
 bool MessageQueueClient::poll_event(Event &ev) {
-    std::lock_guard<std::mutex> lock(_event_mutex);
-    if (_event_queue.empty())
-        return false;
+    std::unique_lock<std::mutex> lock(_event_mutex);
+    _event_cv.wait(lock, [this] { return !_event_queue.empty() || !_connected; });
+
+    if (_event_queue.empty()) return false;
+
     ev = std::move(_event_queue.front());
     _event_queue.pop();
     return true;
