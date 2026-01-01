@@ -5,6 +5,7 @@
 #include <string>
 
 constexpr size_t HEADER_PACKET_SIZE = 6;
+constexpr uint32_t MAX_PAYLOAD = 10 * 1024 * 1024;
 
 inline std::map<std::string, char> client_role_map = {
     {"PUBLISHER", 'P'},
@@ -17,8 +18,7 @@ inline std::map<std::string, char> client_action_map = {
     {"SUBSCRIBE", 'S'},
     {"UNSUBSCRIBE", 'U'}};
 
-class Protocol 
-{
+class Protocol {
     friend class MessageQueueClient;
 public:
     static std::string prepare_message(char role, char cmd, const std::string &payload);

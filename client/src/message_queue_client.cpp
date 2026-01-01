@@ -18,12 +18,35 @@ void thread_safe_print(const std::string &msg) {
     std::cout << msg << std::endl;
 }
 
+// ------------------------------
+// CONSTRUCTOR
+// ------------------------------
+
+MessageQueueClient::MessageQueueClient()
+    : MessageQueueClient("")
+{}
+
+MessageQueueClient::MessageQueueClient(const std::string &client_login)
+    : _socket(-1),
+      _client_login(client_login),
+      _connected(false)
+{}
+
+MessageQueueClient::~MessageQueueClient() {
+    disconnect();
+}
+
+// ------------------------------
+// CONNECTION
+// ------------------------------
+
 bool MessageQueueClient::connect_to_server(const std::string &host, const std::string &port) {
     addrinfo hints{ .ai_family = AF_INET, .ai_socktype = SOCK_STREAM, .ai_protocol = IPPROTO_TCP }, *res{};
     if (int err = getaddrinfo(host.c_str(), port.c_str(), &hints, &res)) {
         thread_safe_print(gai_strerror(err));
         return false;
     }
+    //? We currently work in blocking mode so this might block whole program -> switch to non-blocking mode?
     _socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (connect(_socket, res->ai_addr, res->ai_addrlen) == -1) {
         thread_safe_print("DEBUG: Error with connect");
@@ -49,7 +72,52 @@ void MessageQueueClient::disconnect() {
         close(_socket);
         _socket = -1;
     }
+    _connected.store(false);
 }
+
+void MessageQueueClient::_handle_disconnect_event() {
+    _connected.store(false);
+    Event ev{.type = Event::Type::Disconnected};
+    std::lock_guard<std::mutex> lock(_event_mutex);
+    _event_queue.push(std::move(ev));
+    _event_cv.notify_one();
+}
+
+bool MessageQueueClient::_verify_connection() {
+    std::string login_msg = Protocol::prepare_message('L', 'O', _client_login);
+    if (!send_message(_socket, login_msg))
+        return false;
+
+    // Read acknowledgment and accept from a server.
+    char header[6];
+    if (!read_exactly(_socket, header, 6))
+        return false;
+
+    auto [role, cmd, len] = Protocol::_decode_packet(std::string(header, 6));
+
+    if (len > MAX_PAYLOAD) {
+        thread_safe_print("DEBUG: Server sent too much data.");
+        return false;
+    }
+
+    std::string payload;
+    if (len > 0) {
+        payload.resize(len);
+        if (!read_exactly(_socket, payload.data(), len)) return false;
+    }
+    // Server accept new client by sending LO message.
+    if (role == 'L' && cmd == 'O') {
+        thread_safe_print("DEBUG: Server accepted login: " + payload);
+        return true;
+    }
+
+    thread_safe_print("DEBUG: Login failed: " + payload);
+    return false;
+}
+
+// ------------------------------
+// ACTIONS
+// ------------------------------
 
 bool MessageQueueClient::create_queue(const std::string &queue_name) {
     char mode = client_role_map["PUBLISHER"];
@@ -87,16 +155,18 @@ bool MessageQueueClient::unsubscribe(const std::string &queue_name) {
     return MessageQueueClient::send_message(_socket, message);
 }
 
+// ------------------------------
+// COMMUNICATION
+// ------------------------------
+
 bool MessageQueueClient::send_message(int sock, const std::string &data) {
     if (sock < 0) return false;
 
     size_t total_sent = 0;
     while (total_sent < data.size()) {
-        ssize_t sent = send(sock, data.data() + total_sent, data.size() - total_sent, 0);
+        ssize_t sent = send(sock, data.data() + total_sent, data.size() - total_sent, MSG_NOSIGNAL);
         
-        if (sent <= 0) { 
-            return false;
-        }
+        if (sent <= 0) return false;
         total_sent += sent;
     }
     return true;
@@ -115,27 +185,22 @@ bool MessageQueueClient::read_exactly(int sock, char *buffer, size_t size) {
     return true;
 }
 
-void MessageQueueClient::_handle_disconnect()
-{
-    _connected.store(false);
-    Event ev{ .type=Event::Type::Disconnected };
-    std::lock_guard<std::mutex> lock(_event_mutex);
-    _event_queue.push(std::move(ev));
-    _event_cv.notify_one();
-}
-
 void MessageQueueClient::_receiver_loop() {
     char header_buffer[HEADER_PACKET_SIZE];
-    // const size_t MAX_PAYLOAD = 10 * 1024 * 1024;
 
     while (_connected) {
-        Event ev{};
         if (!read_exactly(_socket, header_buffer, HEADER_PACKET_SIZE))
         {
-            _handle_disconnect();
+            _handle_disconnect_event();
             break;
         }
         auto [role, cmd, payload_len] = Protocol::_decode_packet(std::string(header_buffer, HEADER_PACKET_SIZE));
+
+        if (payload_len > MAX_PAYLOAD) {
+            thread_safe_print("DEBUG: Payload too big");
+            _handle_disconnect_event();
+            break;
+        }
 
         std::string payload;
         if (payload_len > 0)
@@ -143,12 +208,14 @@ void MessageQueueClient::_receiver_loop() {
             payload.resize(payload_len);
             if (!read_exactly(_socket, payload.data(), payload_len))
             {
-                _handle_disconnect();
+                _handle_disconnect_event();
                 break;
             }
         }
 
+        // todo this event handling needs refactoring and separate place
         // HANDLING GIVEN MESSAGE TYPES
+        Event ev{};
         if (role == 'I' && cmd == 'N')
         {
             ev.type = Event::Type::QueueList;
@@ -206,15 +273,26 @@ void MessageQueueClient::_receiver_loop() {
     }
 }
 
+// ------------------------------
+// HANDLING MESSAGES
+// ------------------------------
+
+// @brief Process payload and read size in correct endian order.
+// @param data Data that we want to process.
+// @param offset Offset for reading data.
+// @param output Size variable where converted value will be saved.
+void extract_convert_net_to_host(const std::string &data, size_t offset, uint32_t& output) {
+    std::memcpy(&output, data.data() + offset, sizeof(uint32_t));
+    output = ntohl(output);
+}
 
 std::tuple<std::string, std::string> MessageQueueClient::_handle_message_payload(const std::string &payload) {
     if (payload.size() < 4) {
-        // Nie ma dlugosci nazwy
+        thread_safe_print("DEBUG: Incorrect message from server.");
     }
 
-    uint32_t q_name_size_net;
-    std::memcpy(&q_name_size_net, payload.data(), sizeof(uint32_t));
-    uint32_t q_name_size = ntohl(q_name_size_net);
+    uint32_t q_name_size;
+    extract_convert_net_to_host(payload, 0, q_name_size);
 
     if (4 + q_name_size > payload.size()) {
         thread_safe_print("DEBUG: Queue name exceeds data length.");
@@ -228,83 +306,35 @@ std::tuple<std::string, std::string> MessageQueueClient::_handle_message_payload
 
 std::vector<std::string> MessageQueueClient::_handle_queue_list_payload(const std::string &payload) {
     std::vector<std::string> queues;
-
-    if (payload.size() < 4)
-        return queues;
+    if (payload.size() < 4) return queues;
 
     uint32_t count_net;
-    std::memcpy(&count_net, payload.data(), 4);
-    uint32_t count = ntohl(count_net);
+    extract_convert_net_to_host(payload, 0, count_net);
 
     size_t offset = 4;
 
-    for (uint32_t i = 0; i < count; ++i)
-    {
-        if (offset + 4 > payload.size())
-            break;
+    // Get all available queues and save it to list.
+    for (uint32_t i = 0; i < count_net; ++i) {
+        if (offset + 4 > payload.size()) break;
 
-        uint32_t name_len_net;
-        std::memcpy(&name_len_net, payload.data() + offset, 4);
-        uint32_t name_len = ntohl(name_len_net);
+        uint32_t q_name_size;
+        extract_convert_net_to_host(payload, offset, q_name_size);
         offset += 4;
 
-        if (offset + name_len > payload.size())
-            break;
+        if (offset + q_name_size > payload.size()) break;
 
-        std::string q_name = payload.substr(offset, name_len);
+        std::string q_name = payload.substr(offset, q_name_size);
         queues.push_back(q_name);
 
-        offset += name_len; 
+        offset += q_name_size; 
     }
-
     return queues;
-}
-
-MessageQueueClient::MessageQueueClient()
-    : MessageQueueClient("")
-{
-}
-
-MessageQueueClient::MessageQueueClient(const std::string &client_login)
-    : _socket(-1),
-      _client_login(client_login),
-      _connected(false)
-{
-}
-
-MessageQueueClient::~MessageQueueClient() {
-    disconnect();
-}
-
-bool MessageQueueClient::_verify_connection() {
-    std::string login_msg = Protocol::prepare_message('L', 'O', _client_login); 
-    if(!send_message(_socket, login_msg)) return false;
-
-    char header[6];
-    if (!read_exactly(_socket, header, 6)) return false;
-
-    auto [role, cmd, len] = Protocol::_decode_packet(std::string(header, 6));
-
-    std::string payload;
-    if (len > 0) {
-        payload.resize(len);
-        if (!read_exactly(_socket, payload.data(), len)) return false;
-    }
-
-    if (role == 'L' && cmd == 'O') {
-        thread_safe_print("DEBUG: Server accepted login: " + payload);
-        return true;
-    }
-
-    thread_safe_print("DEBUG: Login failed: " + payload);
-    return false;
 }
 
 std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std::string &payload) {
     size_t offset = 0;
-    uint32_t  q_name_len_net;
-    std::memcpy(&q_name_len_net, payload.data() + offset, 4);
-    uint32_t q_name_len = ntohl(q_name_len_net);
+    uint32_t  q_name_len;
+    extract_convert_net_to_host(payload, offset, q_name_len);
     offset += 4;
 
     std::string queue_name = payload.substr(offset, q_name_len);
@@ -312,10 +342,10 @@ std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std:
 
     std::vector<std::string> messages;
 
+    // Get all available messages for subscriber and save it to list.
     while (offset + 4 <= payload.size()){
-        uint32_t msg_len_net;
-        std::memcpy(&msg_len_net, payload.data() + offset, 4);
-        uint32_t msg_len = ntohl(msg_len_net);
+        uint32_t msg_len;
+        extract_convert_net_to_host(payload, offset, msg_len);
         offset += 4;
 
         if (offset + msg_len > payload.size())
