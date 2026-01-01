@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Event.h"
+
 #include <string>
 #include <map>
 #include <thread>
@@ -11,30 +13,8 @@
 #include <arpa/inet.h>
 
 
-
 class MessageQueueClient {
-public:
-
-    // Event is logical abstraction to deserialized server action.
-    // For convinience, types are defined as well as related queues or message that user can read.
-    struct Event
-    {
-        enum class Type {
-            QueueList,
-            Message,
-            BatchMessages,
-            Disconnected,
-            Error,
-            StatusUpdate,
-            PingPong
-        };
-        Type type;
-        std::string queue;
-        std::string message;
-        std::vector<std::string> queues;
-        std::vector<std::string> messages;
-    };
-
+ public:
     MessageQueueClient();
     MessageQueueClient(const std::string &client_login);
     ~MessageQueueClient();
@@ -63,7 +43,7 @@ public:
         return _available_queues;
     }
 
-private:
+ private:
     int _socket = -1;
     std::string _client_login;
     std::thread _receiver_thread;
@@ -84,7 +64,7 @@ private:
     std::vector<std::string> _handle_queue_list_payload(const std::string &payload);
     std::vector<std::string> _handle_new_sub_messages(const std::string &payload);
 
-    // Verifies connection with server by sending message 'LO' and client login. Server should return message.
+    // Verifies connection with server by sending message 'LO' and client login. Server should return message OK.
     bool _verify_connection();
     void _handle_disconnect_event();
 

@@ -38,33 +38,33 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-        std::thread ui_thread([&client]() {
-        while (true) {
-            MessageQueueClient::Event ev;
-            if (client.poll_event(ev)) {
-                switch (ev.type) {
-                    case MessageQueueClient::Event::Type::Message:
-                        std::cout << "\n[NEW MESSAGE] Queue: " << ev.queue << " | Content: " << ev.message << "\n> " << std::flush;
-                        break;
-                    case MessageQueueClient::Event::Type::BatchMessages:
-                        std::cout << "\n[HISTORY] Received " << ev.messages.size() << " past messages.\n> " << std::flush;
-                        for(const auto& m : ev.messages) std::cout << "  - " << m << "\n";
-                        break;
-                    case MessageQueueClient::Event::Type::QueueList:
-                        std::cout << "\n[SERVER] Queue List Updated. Total: " << ev.queues.size() << "\n> " << std::flush;
-                        break;
-                    case MessageQueueClient::Event::Type::StatusUpdate:
-                        std::cout << "\n[OK] " << ev.message << "\n> " << std::flush;
-                        break;
-                    case MessageQueueClient::Event::Type::Error:
-                        std::cerr << "\n[SERVER ERROR] " << ev.message << "\n> " << std::flush;
-                        break;
-                    case MessageQueueClient::Event::Type::Disconnected:
-                        std::cout << "\n[DISCONNECTED FROM SERVER].\n";
-                        exit(0);
-                }
+    std::thread ui_thread([&client]() {
+    while (true) {
+        Event ev;
+        if (client.poll_event(ev)) {
+            switch (ev.type()) {
+                case Event::Type::Message:
+                    std::cout << "\n[NEW MESSAGE] Queue: " << ev.source() << " | Content: " << ev.text() << "\n> " << std::flush;
+                    break;
+                case Event::Type::BatchMessages:
+                    std::cout << "\n[HISTORY] Received " << ev.items().size() << " past messages.\n> " << std::flush;
+                    for(const auto& m : ev.items()) std::cout << "  - " << m << "\n";
+                    break;
+                case Event::Type::QueueList:
+                    std::cout << "\n[SERVER] Queue List Updated. Total: " << ev.items().size() << "\n> " << std::flush;
+                    break;
+                case Event::Type::StatusUpdate:
+                    std::cout << "\n[OK] " << ev.text() << "\n> " << std::flush;
+                    break;
+                case Event::Type::Error:
+                    std::cerr << "\n[SERVER ERROR] " << ev.text() << "\n> " << std::flush;
+                    break;
+                case Event::Type::Disconnected:
+                    std::cout << "\n[DISCONNECTED FROM SERVER].\n";
+                    exit(0);
             }
-        } });
+        }
+    } });
     ui_thread.detach();
 
     print_help();
