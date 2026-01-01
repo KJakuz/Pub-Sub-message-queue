@@ -215,70 +215,70 @@ void MessageQueueClient::_receiver_loop() {
             }
         }
 
-        // todo this event handling needs refactoring and separate place
-        // HANDLING GIVEN MESSAGE TYPES
         Event ev{};
-        if (role == 'I' && cmd == 'N')
-        {
-            ev.type = Event::Type::QueueList;
-            ev.queues = _handle_queue_list_payload(payload);
-        }
-        else if (role == 'M' && cmd == 'S')
-        {
-            ev.type = Event::Type::Message;
-            auto [q, msg] = _handle_message_payload(payload);
-            ev.queue = q;
-            ev.message = msg;
-        }
-        else if (role == 'M' && cmd == 'A')
-        {
-            ev.type = Event::Type::BatchMessages;
-            ev.messages = _handle_new_sub_messages(payload);
-        }
-        else if (role == 'L' && cmd == 'O') {
-            if (payload.find("ER:") == 0) {
-                ev.type = Event::Type::Error;
-                ev.message = payload;
-            }
-        }
-        else if (role == 'Q' && cmd == 'L') {
-            auto list = _handle_queue_list_payload(payload);
-            {
-                std::lock_guard<std::mutex> lock(_queues_cache_mutex);
-                _available_queues = list;
-            }
-            ev.type = Event::Type::QueueList;
-            ev.queues = list;
-        }
-        else if ((role == 'S' && (cmd == 'S' || cmd == 'U')) || (role == 'P' && (cmd == 'C' || cmd == 'D' || cmd == 'B'))) {
-            if (payload.find("ER:") == 0)
-            {
-                ev.type = Event::Type::Error;
-                ev.message = "Cmd " + std::string(1, role) + std::string(1, cmd) + " Failed: " + payload;
-            }
-            else
-            {
-                ev.type = Event::Type::StatusUpdate;
-                ev.message = std::string(1, role) + std::string(1, cmd) + " Success";
-            }
-        }
-        else if (role == 'N' && cmd == 'D') {
-            ev.type = Event::Type::Error;
-            ev.message = "Queue Deleted: " + payload;
-        }
-        else if (role == 'H' && cmd == 'B') {
-            std::string heartbeat = Protocol::prepare_message('H', 'B', "");
-            send_message(_socket, heartbeat);
-            continue;
-        }
-
-        if (ev.type != Event::Type::Disconnected) {
-            std::lock_guard<std::mutex> lock(_event_mutex);
-            _event_queue.push(std::move(ev));
-            _event_cv.notify_one();
-        }
+        _dispatch_event(role, cmd, payload, ev);
     }
 }
+
+void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &payload, Event &ev) {
+    // todo fix this if mess and make conditions readable
+    if (role == 'H' && cmd == 'B') {
+        std::string heartbeat = Protocol::prepare_message('H', 'B', "");
+        send_message(_socket, heartbeat);
+        return;
+    }
+
+    if (role == 'I' && cmd == 'N') {
+        ev.type = Event::Type::QueueList;
+        ev.queues = _handle_queue_list_payload(payload);
+    }
+    else if (role == 'M' && cmd == 'S') {
+        ev.type = Event::Type::Message;
+        auto [q, msg] = _handle_message_payload(payload);
+        ev.queue = q;
+        ev.message = msg;
+    }
+    else if (role == 'M' && cmd == 'A') {
+        ev.type = Event::Type::BatchMessages;
+        ev.messages = _handle_new_sub_messages(payload);
+    }
+    else if (role == 'L' && cmd == 'O') {
+        if (payload.find("ER:") == 0) {
+            ev.type = Event::Type::Error;
+            ev.message = payload;
+        }
+    }
+    else if (role == 'Q' && cmd == 'L') {
+        auto list = _handle_queue_list_payload(payload);
+        {
+            std::lock_guard<std::mutex> lock(_queues_cache_mutex);
+            _available_queues = list;
+        }
+        ev.type = Event::Type::QueueList;
+        ev.queues = list;
+    }
+    else if ((role == 'S' && (cmd == 'S' || cmd == 'U')) || (role == 'P' && (cmd == 'C' || cmd == 'D' || cmd == 'B'))) {
+        if (payload.find("ER:") == 0) {
+            ev.type = Event::Type::Error;
+            ev.message = "Cmd " + std::string(1, role) + std::string(1, cmd) + " Failed: " + payload;
+        }
+        else {
+            ev.type = Event::Type::StatusUpdate;
+            ev.message = std::string(1, role) + std::string(1, cmd) + " Success";
+        }
+    }
+    else if (role == 'N' && cmd == 'D') {
+        ev.type = Event::Type::Error;
+        ev.message = "Queue Deleted: " + payload;
+    }
+
+    if (ev.type != Event::Type::Disconnected) {
+        std::lock_guard<std::mutex> lock(_event_mutex);
+        _event_queue.push(std::move(ev));
+        _event_cv.notify_one();
+    }
+}
+
 
 // ------------------------------
 // HANDLING MESSAGES

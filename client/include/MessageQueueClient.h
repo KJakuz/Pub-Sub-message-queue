@@ -87,4 +87,6 @@ private:
     // Verifies connection with server by sending message 'LO' and client login. Server should return message.
     bool _verify_connection();
     void _handle_disconnect_event();
+
+    void _dispatch_event(char &role, char &cmd, std::string &payload, Event &ev);
 };
