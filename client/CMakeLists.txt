@@ -15,6 +15,8 @@ set(LIB_SOURCES
 
 add_library(mq_client SHARED ${LIB_SOURCES})
 
+target_compile_options(mq_client PRIVATE -Wall -Wextra -Wpedantic)
+
 target_link_libraries(mq_client PRIVATE Threads::Threads)
 
 add_executable(mq_demo main.cpp)

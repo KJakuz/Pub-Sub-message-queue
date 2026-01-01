@@ -35,17 +35,20 @@ public:
     MessageQueueClient();
     MessageQueueClient(const std::string &client_login);
     ~MessageQueueClient();
-    // TODO: SPlit logic between separate classes
+    // TODO: Split logic between separate classes
     // Connection
+
     bool connect_to_server(const std::string &host, const std::string &port);
     void disconnect();
 
     // Publisher
+    
     bool create_queue(const std::string &queue_name);
     bool delete_queue(const std::string &queue_name);
-    bool publish(const std::string &queue_name, std::string &content);
+    bool publish(const std::string &queue_name, std::string &content, size_t ttl);
 
     // Subscriber
+
     bool subscribe(const std::string &queue_name);
     bool unsubscribe(const std::string &queue_name);
 
@@ -62,7 +65,7 @@ private:
     std::string _client_login;
     std::thread _receiver_thread;
     std::atomic<bool> _connected{false};
-
+    // ? Should we make a queue size constraint if server sends a lot of msg in short time and user dont poll them?
     std::queue<Event> _event_queue;
     std::mutex _event_mutex;
     std::condition_variable _event_cv;
@@ -78,6 +81,7 @@ private:
     std::vector<std::string> _handle_queue_list_payload(const std::string &payload);
     std::vector<std::string> _handle_new_sub_messages(const std::string &payload);
 
+    // Verifies connection with server by sending message 'LO' and client login. Server should return message.
     bool _verify_connection();
-
+    void _handle_disconnect_event();
 };

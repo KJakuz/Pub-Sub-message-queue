@@ -108,7 +108,7 @@ int main(int argc, char *argv[])
             {
                 std::string q_name = line.substr(first_space + 1, second_space - first_space - 1);
                 std::string content = line.substr(second_space + 1);
-                client.publish(q_name, content);
+                client.publish(q_name, content, 3600);
             }
         }
         else if (cmd == "delete" && first_space != std::string::npos)
