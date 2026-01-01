@@ -43,8 +43,8 @@ std::tuple<int, std::string, std::string> recv_message(int sock) {
     std::memcpy(&network_len, header + 2, sizeof(uint32_t));
     uint32_t payload_size = ntohl(network_len);
     
-    //TODO:maybe limit?
-    if (payload_size > 10 * 1024 * 1024) return {-1, "", ""};
+    //100MB limit
+    if (payload_size > 100 * 1024 * 1024) return {-1, "", ""};
     
     std::string msg_content;
     if (payload_size > 0) {

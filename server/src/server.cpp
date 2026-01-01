@@ -22,8 +22,9 @@ std::atomic<int> listening_socket_global(-1);
 std::mutex clients_mutex;
 std::mutex queues_mutex;
 std::mutex log_mutex;
+
 std::unordered_map<std::string, Client> clients;
-std::unordered_map<std::string, Queue> Existing_Queues;
+std::unordered_map<std::string, Queue> existing_queues;
 
 
 void safe_print(const std::string& msg) {
@@ -71,10 +72,15 @@ void cleanup_worker() {
             }
         }
         
-        //messages cleanup
+        //send heartbeat to alive clients
+        for (int socket : alive_sockets) {
+            send_message(socket, prepare_message("HB", ""));
+        }
+        
+        //messages cleanup after ttl expire
         {
             std::lock_guard<std::mutex> lock(queues_mutex);
-            for (auto& [name, queue] : Existing_Queues) {
+            for (auto& [name, queue] : existing_queues) {
                 auto& msgs = queue.messages;
                 msgs.erase(
                     std::remove_if(msgs.begin(), msgs.end(),
@@ -82,10 +88,6 @@ void cleanup_worker() {
                     msgs.end()
                 );
             }
-        }
-    //send heartbeat to alive clients
-        for (int socket : alive_sockets) {
-            send_message(socket, prepare_message("HB", ""));
         }
     }
 }
@@ -136,6 +138,7 @@ void handle_client(int client_socket){
             continue;
         }
 
+        //if client not logged in yet
         if(client.id.empty()){
             if(msg_type == "LO"){
                 client.socket = client_socket;
@@ -148,9 +151,9 @@ void handle_client(int client_socket){
                 }
             }
         }
-        else
+        else //client logged in
         {
-            if(msg_type == "HB"){
+            if(msg_type == "HB"){ //sends heartbeat to client
                 continue;
             }
             else if(msg_type == "SS"){

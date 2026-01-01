@@ -7,7 +7,7 @@
 
 
 std::unordered_map<std::string, Queue>::iterator find_queue_by_name(const std::string& queue_name) {
-    return Existing_Queues.find(queue_name);
+    return existing_queues.find(queue_name);
 }
 
 bool is_client_subscribed(const Queue& queue, const std::string& client_id) {
@@ -20,7 +20,7 @@ std::vector<std::string>::iterator find_subscriber(Queue& queue, const std::stri
 }
 
 bool queue_exists(const std::string& queue_name) {
-    return find_queue_by_name(queue_name) != Existing_Queues.end();
+    return find_queue_by_name(queue_name) != existing_queues.end();
 }
 
 
@@ -33,11 +33,12 @@ std::string construct_queue_list(){
    
     {
         std::lock_guard<std::mutex> lock(queues_mutex);
+        internal_data.reserve(existing_queues.size() * 32); // Approximate size reservation
         
-        uint32_t queues_count = htonl(static_cast<uint32_t>(Existing_Queues.size()));
+        uint32_t queues_count = htonl(static_cast<uint32_t>(existing_queues.size()));
         internal_data.append(reinterpret_cast<const char*>(&queues_count), 4);
 
-        for (const auto& [name, q] : Existing_Queues) {
+        for (const auto& [name, q] : existing_queues) {
             // For every queue: name lenght(4b):Name
             uint32_t n_len = htonl(static_cast<uint32_t>(q.name.length()));
             internal_data.append(reinterpret_cast<const char*>(&n_len), 4);
@@ -75,14 +76,14 @@ void broadcast_queues_list(){
     }
 }
 
-void send_single_queue_list(Client client){
+void send_single_queue_list(const Client& client){
     std::string packet = construct_queue_list();
      if (!send_message(client.socket, packet)) {
         safe_error("SEND_ERROR: QL to socket:" + std::to_string(client.socket));
      }
 }
 
-void send_published_message(Client client,std::string &queue_name, std::string &content){
+void send_published_message(const Client& client, const std::string &queue_name, const std::string &content){
     /*
     SENDING MESSAGE THAT LOOKS LIKE THIS: 
     [TYPE(2b)] [CONTENT_SIZE(4b)] [QUEUE_NAME_SIZE(4b)] [QUEUE_NAME(n)] [MESSAGE(n)] 
@@ -115,7 +116,7 @@ void send_published_message(Client client,std::string &queue_name, std::string &
     }
 }
 
-void send_messages_to_new_subscriber(Client client, std::string queue_name) { 
+void send_messages_to_new_subscriber(const Client& client, const std::string& queue_name) { 
     /*
     SENDING MESSAGE THAT LOOKS LIKE THIS: 
     [TYPE(2b)] [CONTENT_SIZE(4b)] [QUEUE_NAME_SIZE(4b)] [QUEUE_NAME(n)] [MESSAGE1_SIZE(4b)] [MESSAGE1(n)] ... [MESSAGEn_SIZE(4b)] [MESSAGEn(n)] 
@@ -127,7 +128,7 @@ void send_messages_to_new_subscriber(Client client, std::string queue_name) {
     {
     std::lock_guard<std::mutex> lock(queues_mutex);
     auto it = find_queue_by_name(queue_name);
-    if (it != Existing_Queues.end()) {
+    if (it != existing_queues.end()) {
         exists = true;
         auto now = std::chrono::steady_clock::now();
 
@@ -161,7 +162,7 @@ void send_messages_to_new_subscriber(Client client, std::string queue_name) {
     return;
 }
 
-void notify_after_delete(std::vector<std::string> ids, std::string &queue_name){
+void notify_after_delete(const std::vector<std::string>& ids, const std::string &queue_name){
     std::string packet = prepare_message("ND", queue_name + " was deleted");
     for (auto const& id : ids){
         int sock = -1;
@@ -177,7 +178,7 @@ void notify_after_delete(std::vector<std::string> ids, std::string &queue_name){
     }
 }
 
-void subscribe_to_queue(Client client, std::string queue_name) {
+void subscribe_to_queue(const Client& client, const std::string& queue_name) {
     bool valid_op = false;
     bool already_subscribed = false;
     
@@ -186,7 +187,7 @@ void subscribe_to_queue(Client client, std::string queue_name) {
         
         auto it = find_queue_by_name(queue_name);
         
-        if (it != Existing_Queues.end()) {
+        if (it != existing_queues.end()) {
             if(!is_client_subscribed(it->second, client.id)){
                 it->second.subscribers.push_back(client.id);
                 valid_op = true;
@@ -220,7 +221,7 @@ void subscribe_to_queue(Client client, std::string queue_name) {
     return;
 }
 
-void unsubscribe_from_queue(Client client, std::string queue_name) {  
+void unsubscribe_from_queue(const Client& client, const std::string& queue_name) {  
     bool valid_op = false;
     bool subscribing = true;
     
@@ -229,7 +230,7 @@ void unsubscribe_from_queue(Client client, std::string queue_name) {
         
         auto it = find_queue_by_name(queue_name);
         
-        if (it != Existing_Queues.end()) {
+        if (it != existing_queues.end()) {
             auto sub_it = find_subscriber(it->second, client.id);
             if(sub_it != it->second.subscribers.end()){
                 it->second.subscribers.erase(sub_it);
@@ -263,7 +264,7 @@ void unsubscribe_from_queue(Client client, std::string queue_name) {
     return;
 }
 
-void create_queue(Client client, const std::string queue_name) {
+void create_queue(const Client& client, const std::string& queue_name) {
     Queue new_queue;
     bool valid_op = false;
     {
@@ -271,9 +272,9 @@ void create_queue(Client client, const std::string queue_name) {
 
         auto it = find_queue_by_name(queue_name);
 
-        if (it == Existing_Queues.end()) {
+        if (it == existing_queues.end()) {
             new_queue.name = queue_name;
-            Existing_Queues[queue_name] = new_queue;
+            existing_queues[queue_name] = new_queue;
             valid_op = true;
         }
     }
@@ -294,7 +295,7 @@ void create_queue(Client client, const std::string queue_name) {
     return;
 }
 
-void delete_queue(Client client, std::string queue_name) {
+void delete_queue(const Client& client, const std::string& queue_name) {
     bool valid_op = false;
     std::vector<std::string> ids;
     
@@ -303,9 +304,9 @@ void delete_queue(Client client, std::string queue_name) {
         
         auto it = find_queue_by_name(queue_name);
         
-        if (it != Existing_Queues.end()) {
+        if (it != existing_queues.end()) {
             ids = it->second.subscribers;
-            Existing_Queues.erase(it);
+            existing_queues.erase(it);
             valid_op = true;
         }
     }
@@ -330,7 +331,7 @@ void delete_queue(Client client, std::string queue_name) {
     return;
 }
 
-void publish_message_to_queue(Client client, std::string content) {
+void publish_message_to_queue(const Client& client, const std::string& content) {
     
     if (content.length() < 8) {
         if(!send_message(client.socket, prepare_message("PB", "ER:DATA_TOO_SHORT"))){
@@ -364,7 +365,7 @@ void publish_message_to_queue(Client client, std::string content) {
         std::lock_guard<std::mutex> lock(queues_mutex);
         auto it = find_queue_by_name(queue_name);
 
-        if (it != Existing_Queues.end()) {
+        if (it != existing_queues.end()) {
             it->second.messages.push_back({message_body,msg_expire});
             
             std::lock_guard<std::mutex> lock_c(clients_mutex);

@@ -24,7 +24,7 @@ Client get_client_id(Client client, std::string& id) {
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.disconnect_time).count();
                 
                 if (elapsed >= SECONDS_TO_CLEAR_CLIENT) {
-                    for (auto& [name, queue] : Existing_Queues) {
+                    for (auto& [name, queue] : existing_queues) {
                         auto sub_it = std::find(queue.subscribers.begin(), 
                                                queue.subscribers.end(), id);
                         if (sub_it != queue.subscribers.end()) {
