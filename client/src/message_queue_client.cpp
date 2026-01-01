@@ -107,8 +107,10 @@ bool MessageQueueClient::_verify_connection() {
     }
     // Server accept new client by sending LO message.
     if (role == 'L' && cmd == 'O') {
-        thread_safe_print("DEBUG: Server accepted login: " + payload);
-        return true;
+        if (payload.substr(0,2) == "OK") {
+            thread_safe_print("DEBUG: Server accepted login: " + payload);
+            return true;
+        }
     }
 
     thread_safe_print("DEBUG: Login failed: " + payload);
