@@ -46,8 +46,13 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
         thread_safe_print(gai_strerror(err));
         return false;
     }
-    //? We currently work in blocking mode so this might block whole program -> switch to non-blocking mode?
     _socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+
+    struct timeval tv;
+    tv.tv_sec = 45;
+    tv.tv_usec = 0;
+    setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv); // todo: think about catching eventual timeout
+
     if (connect(_socket, res->ai_addr, res->ai_addrlen) == -1) {
         thread_safe_print("DEBUG: Error with connect");
         freeaddrinfo(res);
@@ -90,8 +95,8 @@ bool MessageQueueClient::_verify_connection() {
         return false;
 
     // Read acknowledgment and accept from a server.
-    char header[6];
-    if (!read_exactly(_socket, header, 6))
+    char header[HEADER_PACKET_SIZE];
+    if (!read_exactly(_socket, header, HEADER_PACKET_SIZE))
         return false;
 
     auto [role, cmd, len] = Protocol::_decode_packet(std::string(header, 6));
@@ -136,7 +141,7 @@ bool MessageQueueClient::delete_queue(const std::string &queue_name) {
     return MessageQueueClient::send_message(_socket, message);
 }
 
-bool MessageQueueClient::publish(const std::string &queue_name, std::string &content, size_t ttl) {
+bool MessageQueueClient::publish(const std::string &queue_name, const std::string &content, size_t ttl) {
     char mode = client_role_map["PUBLISHER"];
     char action = client_action_map["PUBLISH"];
     std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, ttl);
@@ -367,7 +372,6 @@ std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std:
     return messages;
 }
 
-// Poll event returned from server.
 bool MessageQueueClient::poll_event(Event &ev) {
     std::unique_lock<std::mutex> lock(_event_mutex);
     _event_cv.wait(lock, [this] { return !_event_queue.empty() || !_connected; });

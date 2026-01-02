@@ -18,6 +18,20 @@ inline std::map<std::string, char> client_action_map = {
     {"SUBSCRIBE", 'S'},
     {"UNSUBSCRIBE", 'U'}};
 
+// @brief Handling message Protocol.
+//
+// Header (6 bytes):
+// @param Type: 2 ASCII bytes (e.g., "PB")
+// @param Length: 4-byte uint32 network byte order (payload length N)
+// @param Payload (N bytes) — type-dependent.
+//
+// Payload might be dependent on type of message.
+//
+// Publish payload:
+// @param uint32 queue_name_len (network order)
+// @param uint32 ttl_seconds (network order)
+// @param queue_name (queue_name_len bytes)
+// @param message (remaining bytes)
 class Protocol {
  public:
     static std::string prepare_message(char role, char cmd, const std::string &payload);

@@ -12,38 +12,80 @@
 #include <cstring>
 #include <arpa/inet.h>
 
-
+// @class MessageQueueClient
+// @brief Message queue client supporting publishing and subscribing.
+//
+// @param user_login - an unique user login should be provided.
+//
+// Example usage:
+//
+// @code
+// MessageQueueClient client("user1");
+//
+// if (!client.connect_to_server("127.0.0.1", "9000")) {
+//      handle error
+// }
+//
+// client.create_queue("jobs");
+//
+// client.publish("jobs", "hello world", 60);
+//
+// client.subscribe("jobs");
+//
+// Event ev;
+//
+// while (client.poll_event(ev)) {
+//      process event
+// }
+//
+// client.disconnect();
+// @endcode
+//
+// Internally, a dedicated receiver thread continuously reads data
+// from the server and converts messages into Event objects.
+//
+// Events are stored in an internal queue and retrieved by calling poll_event().
 class MessageQueueClient {
  public:
     MessageQueueClient();
     MessageQueueClient(const std::string &client_login);
     ~MessageQueueClient();
 
-    // Connection
-
+    // @brief Connect to the message queue server.
+    //
+    // Establishes a TCP connection and performs a handshake.
+    //
+    // @param host Server hostname or IP address.
+    // @param port Server port number.
+    // @return true on successful connection, false otherwise.
     bool connect_to_server(const std::string &host, const std::string &port);
+    
+    //@brief Disconnect from the server.
+    //
+    // Stops the receiver thread, shutdowns connection, closes the socket.
     void disconnect();
 
-    // Publisher
-    
     bool create_queue(const std::string &queue_name);
     bool delete_queue(const std::string &queue_name);
-    bool publish(const std::string &queue_name, std::string &content, size_t ttl);
-
-    // Subscriber
+    bool publish(const std::string &queue_name, const std::string &content, size_t ttl);
 
     bool subscribe(const std::string &queue_name);
     bool unsubscribe(const std::string &queue_name);
 
+    // @brief Retrieve the next pending event from the server.
+    //
+    // @param ev Output parameter receiving the event.
+    // @return true if an event was retrieved, false otherwise.
     bool poll_event(Event &ev);
 
-    std::vector<std::string> get_available_queues()
-    {
+    std::vector<std::string> get_available_queues() {
         std::lock_guard<std::mutex> lock(_queues_cache_mutex);
         return _available_queues;
     }
 
- private:
+    bool is_connected() const { return _connected; };
+
+private:
     int _socket = -1;
     std::string _client_login;
     std::thread _receiver_thread;
@@ -58,13 +100,18 @@ class MessageQueueClient {
 
     void _receiver_loop();
     static bool send_message(int socket, const std::string &data);
+
+    // @brief Read exactly N bytes from a socket.
     bool read_exactly(int sock, char *buffer, size_t size);
     
     std::tuple<std::string, std::string> _handle_message_payload(const std::string &payload);
     std::vector<std::string> _handle_queue_list_payload(const std::string &payload);
     std::vector<std::string> _handle_new_sub_messages(const std::string &payload);
 
-    // Verifies connection with server by sending message 'LO' and client login. Server should return message OK.
+    // @brief Verify server connection via handshake.
+    //
+    // Seends a login message and expects an OK response.
+    // @return true if verification succeeded.
     bool _verify_connection();
     void _handle_disconnect_event();
 
