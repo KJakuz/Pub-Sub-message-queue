@@ -10,8 +10,10 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <tuple>
+#include <map>
 
 #define PACKET_HEADER_SIZE 6
+#define MAX_PAYLOAD_SIZE_MB 10
 #define SECONDS_TO_CLEAR_CLIENT 30
 #define CLIENT_READ_TIMEOUT 45
 #define HEARTBEAT_INTERVAL 30
@@ -42,6 +44,8 @@ extern std::unordered_map<std::string,Client> clients;
 extern std::mutex clients_mutex;
 extern std::mutex queues_mutex;
 extern std::mutex log_mutex;
+extern std::mutex socket_map_mutex;
+extern std::map<int, std::mutex> socket_mutexes;
 
 void safe_print(const std::string& msg);
 void safe_error(const std::string& msg);

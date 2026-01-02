@@ -21,6 +21,8 @@ std::mutex clients_mutex;
 std::mutex queues_mutex;
 std::mutex log_mutex;
 std::mutex threads_mutex;
+std::mutex socket_map_mutex;
+std::map<int, std::mutex> socket_mutexes;
 
 std::unordered_map<std::string, Client> clients;
 std::unordered_map<std::string, Queue> existing_queues;
@@ -49,7 +51,10 @@ void cleanup_worker() {
         if (!running) break;
         
         heartbeat_counter++;
-        if (heartbeat_counter >= HEARTBEAT_INTERVAL) {
+        if (heartbeat_counter < HEARTBEAT_INTERVAL) {
+            continue;
+        }
+        else{
             heartbeat_counter = 0;   
         }
 
@@ -125,15 +130,15 @@ void handle_client(int client_socket){
     client.socket = client_socket;
 
     while(running){
-        int status;
+        recv_status status;
         std::string msg_type, msg_content;
         std::tie(status, msg_type, msg_content) = recv_message(client_socket);
         
-        if (status == 0) {
-            safe_print("socket:"+ std::to_string(client.socket) +"  client id:"+(client.id.empty() ? "Unknown" : client.id) + "  disconnected");
+        if (status == recv_status::DISCONNECT) {
+            safe_print("socket:"+ std::to_string(client.socket) +"  client id:"+ (client.id.empty() ? "Unknown" : client.id) + "  disconnected");
             break;
         }
-        else if (status < 0 && msg_type.empty()) {
+        else if (status == recv_status::NETWORK_ERROR) {
             if (errno == ECONNRESET) {
                  safe_print((client.id.empty() ? "Unknown" : client.id) + " disconnected abruptly (ECONNRESET)");
             } else {
@@ -141,16 +146,16 @@ void handle_client(int client_socket){
             }
             break;
         }
-        else if (status == -2) {
+        else if (status == recv_status::PAYLOAD_TOO_LARGE) {
              safe_error("Client " + (client.id.empty() ? "Unknown" : client.id) + " tried to send too huge message");
              send_message(client_socket, prepare_message(msg_type, "ER:MSG_TOO_BIG"));
              break;
         }
-        else if (status < 0) {
+        else if (status == recv_status::PROTOCOL_ERROR) {
             safe_error("ERROR MESSAGE NOT VALID FROM SOCKET:" + std::to_string(client.socket));
             continue;
         }
-
+        
         //if client not logged in yet
         if(client.id.empty()){
             if(msg_type == "LO"){
@@ -203,6 +208,11 @@ void handle_client(int client_socket){
             safe_print("Client " + client.id + " disconnected (session preserved)");
         }
     }
+
+    {
+        std::lock_guard<std::mutex> lock(socket_map_mutex);
+        socket_mutexes.erase(client_socket);
+    }
     shutdown(client_socket, SHUT_RDWR);
     close(client_socket);
     return;
@@ -227,6 +237,7 @@ int main(int argc, char  **argv){
     int gai_err = getaddrinfo(NULL, argv[1], &hints, &res);
     if (gai_err != 0) {
         safe_error("getaddrinfo error: " + std::string(gai_strerror(gai_err)));
+        freeaddrinfo(res);
         return -1;
     }
 
