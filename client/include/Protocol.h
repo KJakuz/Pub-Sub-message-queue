@@ -5,18 +5,20 @@
 #include <string>
 
 constexpr size_t HEADER_PACKET_SIZE = 6;
-constexpr uint32_t MAX_PAYLOAD = 10;
+constexpr uint32_t MAX_PAYLOAD = 1 * 1024 * 1024;
 
-inline std::map<std::string, char> client_role_map = {
-    {"PUBLISHER", 'P'},
-    {"SUBSCRIBER", 'S'}};
+namespace Role {
+    inline constexpr char Publisher = 'P';
+    inline constexpr char Subscriber = 'S';
+}
 
-inline std::map<std::string, char> client_action_map = {
-    {"CREATE_QUEUE", 'C'},
-    {"DELETE_QUEUE", 'D'},
-    {"PUBLISH", 'B'},
-    {"SUBSCRIBE", 'S'},
-    {"UNSUBSCRIBE", 'U'}};
+namespace Action {
+    inline constexpr char Create = 'C';
+    inline constexpr char Delete = 'D';
+    inline constexpr char Publish = 'B';
+    inline constexpr char Subscribe = 'S';
+    inline constexpr char Unsubscribe = 'U';
+}
 
 // @brief Handling message Protocol.
 //

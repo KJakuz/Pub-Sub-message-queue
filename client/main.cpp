@@ -49,6 +49,11 @@ int main(int argc, char *argv[])
                     case Event::Type::Message:
                         std::cout << "[MSG] " << ev.source() << ": " << ev.text() << "\n";
                         break;
+                    case Event::Type::BatchMessages:
+                        std::cout << "\n[HISTORY] Received " << ev.items().size() << " past messages.\n> " << std::flush;
+                        for (const auto &m : ev.items())
+                            std::cout << "  - " << m << "\n";
+                        break;
                     case Event::Type::QueueList:
                         std::cout << "[SERVER] Found " << ev.items().size() << " queues.\n";
                         break;

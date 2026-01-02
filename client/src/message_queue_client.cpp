@@ -134,38 +134,31 @@ bool MessageQueueClient::_verify_connection() {
 // ------------------------------
 
 bool MessageQueueClient::create_queue(const std::string &queue_name) {
-    char mode = client_role_map["PUBLISHER"];
-    char action = client_action_map["CREATE_QUEUE"];
-    std::string message = Protocol::_prepare_message(mode, action, queue_name);
+    std::string message = Protocol::_prepare_message(Role::Publisher, Action::Create, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::delete_queue(const std::string &queue_name) {
-    char mode = client_role_map["PUBLISHER"];
-    char action = client_action_map["DELETE_QUEUE"];
-    std::string message = Protocol::_prepare_message(mode, action, queue_name);
+    std::string message = Protocol::_prepare_message(Role::Publisher, Action::Delete, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
 
-bool MessageQueueClient::publish(const std::string &queue_name, const std::string &content, size_t ttl) {
-    char mode = client_role_map["PUBLISHER"];
-    char action = client_action_map["PUBLISH"];
+bool MessageQueueClient::publish(const std::string &queue_name, const std::string &content, int ttl) {
+    if (ttl < 0) {
+        return false;
+    }
     std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, ttl);
-    std::string message = Protocol::_prepare_message(mode, action, internal_payload);
+    std::string message = Protocol::_prepare_message(Role::Publisher, Action::Publish, internal_payload);
     return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::subscribe(const std::string &queue_name) {
-    char mode = client_role_map["SUBSCRIBER"];
-    char action = client_action_map["SUBSCRIBE"];
-    std::string message = Protocol::_prepare_message(mode, action, queue_name);
+    std::string message = Protocol::_prepare_message(Role::Subscriber, Action::Subscribe, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::unsubscribe(const std::string &queue_name) {
-    char mode = client_role_map["SUBSCRIBER"];
-    char action = client_action_map["UNSUBSCRIBE"];
-    std::string message = Protocol::_prepare_message(mode, action, queue_name);
+    std::string message = Protocol::_prepare_message(Role::Subscriber, Action::Unsubscribe, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
 

@@ -69,7 +69,7 @@ class MessageQueueClient {
 
     bool create_queue(const std::string &queue_name);
     bool delete_queue(const std::string &queue_name);
-    bool publish(const std::string &queue_name, const std::string &content, size_t ttl);
+    bool publish(const std::string &queue_name, const std::string &content, int ttl);
 
     bool subscribe(const std::string &queue_name);
     bool unsubscribe(const std::string &queue_name);
