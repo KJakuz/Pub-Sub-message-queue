@@ -227,34 +227,34 @@ void MessageQueueClient::_receiver_loop() {
 }
 
 void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &payload, Event &ev) {
-    // todo fix this if mess and make conditions readable
-    if (role == 'H' && cmd == 'B') {
+    if (ev.is_heartbeat(role, cmd)) {
         std::string heartbeat = Protocol::prepare_message('H', 'B', "");
         send_message(_socket, heartbeat);
         return;
     }
-    
-    if (role == 'I' && cmd == 'N') {
+    if (ev.is_initial_queue_list(role, cmd)) {
         ev._type = Event::Type::QueueList;
         ev._result = _handle_queue_list_payload(payload);
     }
-    else if (role == 'M' && cmd == 'S') {
+    else if (ev.is_new_message(role, cmd)) {
         ev._type = Event::Type::Message;
         auto [q, msg] = _handle_message_payload(payload);
         ev._source = q;
         ev._result.push_back(msg);
     }
-    else if (role == 'M' && cmd == 'A') {
+    else if (ev.is_new_batch_messages(role, cmd)) {
         ev._type = Event::Type::BatchMessages;
         ev._result = _handle_new_sub_messages(payload);
     }
-    else if (role == 'L' && cmd == 'O') {
-        if (payload.find("ER:") == 0) {
+    else if (ev.is_new_error(role, cmd)) {
+        if (payload.find("ER:") == 0)
+        {
             ev._type = Event::Type::Error;
             ev._result.push_back(payload);
         }
     }
-    else if (role == 'Q' && cmd == 'L') {
+    else if (ev.is_update_queue_list(role, cmd))
+    {
         auto list = _handle_queue_list_payload(payload);
         {
             std::lock_guard<std::mutex> lock(_queues_cache_mutex);
@@ -263,7 +263,7 @@ void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &pay
         ev._type = Event::Type::QueueList;
         ev._result = list;
     }
-    else if ((role == 'S' && (cmd == 'S' || cmd == 'U')) || (role == 'P' && (cmd == 'C' || cmd == 'D' || cmd == 'B'))) {
+    else if (ev.is_new_status_update(role, cmd)) {
         if (payload.find("ER:") == 0) {
             ev._type = Event::Type::Error;
             ev._result.push_back("Cmd " + std::string(1, role) + std::string(1, cmd) + " Failed: " + payload);
@@ -273,7 +273,7 @@ void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &pay
             ev._result.push_back(std::string(1, role) + std::string(1, cmd) + " Success");
         }
     }
-    else if (role == 'N' && cmd == 'D') {
+    else if (ev.is_queue_deleted(role, cmd)) {
         ev._type = Event::Type::Error;
         ev._result.push_back("Queue Deleted: " + payload);
     }

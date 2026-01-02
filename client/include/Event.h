@@ -37,7 +37,19 @@ class Event {
     Type _type;
     std::string _source;
     std::vector<std::string> _result;
+
+
+    // Helper event dispatch methods
+
     bool is_valid() const { return _type != Type::Disconnected; }
+    bool is_heartbeat(char &role, char &cmd) { return role == 'H' && cmd == 'B'; }
+    bool is_initial_queue_list(char &role, char &cmd) { return role == 'I' && cmd == 'N'; }
+    bool is_update_queue_list(char &role, char &cmd) { return role == 'Q' && cmd == 'L'; }
+    bool is_new_message(char &role, char &cmd) { return role == 'M' && cmd == 'S'; }
+    bool is_new_batch_messages(char &role, char &cmd) { return role == 'M' && cmd == 'A'; }
+    bool is_queue_deleted(char &role, char &cmd) { return role == 'N' && cmd == 'D'; }
+    bool is_new_status_update(char &role, char &cmd) { return (role == 'S' && (cmd == 'S' || cmd == 'U')) || (role == 'P' && (cmd == 'C' || cmd == 'D' || cmd == 'B')); }
+    bool is_new_error(char &role, char &cmd) { return role == 'L' && cmd == 'O'; }
 
     friend class MessageQueueClient;
 };
