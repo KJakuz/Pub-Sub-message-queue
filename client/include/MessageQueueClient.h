@@ -12,6 +12,8 @@
 #include <cstring>
 #include <arpa/inet.h>
 
+constexpr size_t SOCKET_TIMEOUT_VALUE = 5;
+
 // @class MessageQueueClient
 // @brief Message queue client supporting publishing and subscribing.
 //
@@ -99,10 +101,10 @@ private:
     std::mutex _queues_cache_mutex;
 
     void _receiver_loop();
-    static bool send_message(int socket, const std::string &data);
+    static bool _send_message(int socket, const std::string &data);
 
     // @brief Read exactly N bytes from a socket.
-    bool read_exactly(int sock, char *buffer, size_t size);
+    bool _read_exactly(int sock, char *buffer, size_t size);
     
     std::tuple<std::string, std::string> _handle_message_payload(const std::string &payload);
     std::vector<std::string> _handle_queue_list_payload(const std::string &payload);

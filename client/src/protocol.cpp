@@ -1,6 +1,6 @@
 #include "Protocol.h"
 
-std::string Protocol::prepare_message(char role, char cmd, const std::string &payload) {
+std::string Protocol::_prepare_message(char role, char cmd, const std::string &payload) {
     std::string buf;
     buf.reserve(HEADER_PACKET_SIZE + payload.size());
     buf += role;

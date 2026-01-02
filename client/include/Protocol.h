@@ -5,7 +5,7 @@
 #include <string>
 
 constexpr size_t HEADER_PACKET_SIZE = 6;
-constexpr uint32_t MAX_PAYLOAD = 10 * 1024 * 1024;
+constexpr uint32_t MAX_PAYLOAD = 1 * 1024 * 1024;
 
 inline std::map<std::string, char> client_role_map = {
     {"PUBLISHER", 'P'},
@@ -34,10 +34,10 @@ inline std::map<std::string, char> client_action_map = {
 // @param message (remaining bytes)
 class Protocol {
  public:
-    static std::string prepare_message(char role, char cmd, const std::string &payload);
 
  private:
-    static std::string _pack_publish_data(const std::string &queue_name, const std::string &content, const int ttl);
+    static std::string _prepare_message(char role, char cmd, const std::string &payload);
+    static std::string _pack_publish_data(const std::string &queue_name, const std::string &content, const int ttl); // todo no need for ttl to be int it is greater tha 0 always
     static std::tuple<char, char, uint32_t> _decode_packet(const std::string &message);
 
     friend class MessageQueueClient;

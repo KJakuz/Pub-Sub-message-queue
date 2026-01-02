@@ -49,9 +49,9 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
     _socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 
     struct timeval tv;
-    tv.tv_sec = 45;
+    tv.tv_sec = SOCKET_TIMEOUT_VALUE;
     tv.tv_usec = 0;
-    setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv); // todo: think about catching eventual timeout
+    setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
 
     if (connect(_socket, res->ai_addr, res->ai_addrlen) == -1) {
         thread_safe_print("DEBUG: Error with connect");
@@ -71,32 +71,38 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
 }
 
 void MessageQueueClient::disconnect() {
+    _connected.store(false);
     if (_socket != -1) {
         shutdown(_socket, SHUT_RDWR);
         if (_receiver_thread.joinable()) _receiver_thread.join();
         close(_socket);
         _socket = -1;
     }
-    _connected.store(false);
 }
 
 void MessageQueueClient::_handle_disconnect_event() {
+    if(!_connected.load()) return; // We don't bother with handling event when we are disconnecting
+
     _connected.store(false);
     Event ev;
     ev._type = Event::Type::Disconnected;
-    std::lock_guard<std::mutex> lock(_event_mutex);
-    _event_queue.push(std::move(ev));
+    ev._result.push_back("Connection lost.");
+
+    {
+        std::lock_guard<std::mutex> lock(_event_mutex);
+        _event_queue.push(std::move(ev));
+    }
     _event_cv.notify_one();
 }
 
 bool MessageQueueClient::_verify_connection() {
-    std::string login_msg = Protocol::prepare_message('L', 'O', _client_login);
-    if (!send_message(_socket, login_msg))
+    std::string login_msg = Protocol::_prepare_message('L', 'O', _client_login);
+    if (!_send_message(_socket, login_msg))
         return false;
 
     // Read acknowledgment and accept from a server.
     char header[HEADER_PACKET_SIZE];
-    if (!read_exactly(_socket, header, HEADER_PACKET_SIZE))
+    if (!_read_exactly(_socket, header, HEADER_PACKET_SIZE))
         return false;
 
     auto [role, cmd, len] = Protocol::_decode_packet(std::string(header, 6));
@@ -109,7 +115,7 @@ bool MessageQueueClient::_verify_connection() {
     std::string payload;
     if (len > 0) {
         payload.resize(len);
-        if (!read_exactly(_socket, payload.data(), len)) return false;
+        if (!_read_exactly(_socket, payload.data(), len)) return false;
     }
     // Server accept new client by sending LO message.
     if (role == 'L' && cmd == 'O') {
@@ -130,44 +136,44 @@ bool MessageQueueClient::_verify_connection() {
 bool MessageQueueClient::create_queue(const std::string &queue_name) {
     char mode = client_role_map["PUBLISHER"];
     char action = client_action_map["CREATE_QUEUE"];
-    std::string message = Protocol::prepare_message(mode, action, queue_name);
-    return MessageQueueClient::send_message(_socket, message);
+    std::string message = Protocol::_prepare_message(mode, action, queue_name);
+    return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::delete_queue(const std::string &queue_name) {
     char mode = client_role_map["PUBLISHER"];
     char action = client_action_map["DELETE_QUEUE"];
-    std::string message = Protocol::prepare_message(mode, action, queue_name);
-    return MessageQueueClient::send_message(_socket, message);
+    std::string message = Protocol::_prepare_message(mode, action, queue_name);
+    return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::publish(const std::string &queue_name, const std::string &content, size_t ttl) {
     char mode = client_role_map["PUBLISHER"];
     char action = client_action_map["PUBLISH"];
     std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, ttl);
-    std::string message = Protocol::prepare_message(mode, action, internal_payload);
-    return MessageQueueClient::send_message(_socket, message);
+    std::string message = Protocol::_prepare_message(mode, action, internal_payload);
+    return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::subscribe(const std::string &queue_name) {
     char mode = client_role_map["SUBSCRIBER"];
     char action = client_action_map["SUBSCRIBE"];
-    std::string message = Protocol::prepare_message(mode, action, queue_name);
-    return MessageQueueClient::send_message(_socket, message);
+    std::string message = Protocol::_prepare_message(mode, action, queue_name);
+    return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::unsubscribe(const std::string &queue_name) {
     char mode = client_role_map["SUBSCRIBER"];
     char action = client_action_map["UNSUBSCRIBE"];
-    std::string message = Protocol::prepare_message(mode, action, queue_name);
-    return MessageQueueClient::send_message(_socket, message);
+    std::string message = Protocol::_prepare_message(mode, action, queue_name);
+    return MessageQueueClient::_send_message(_socket, message);
 }
 
 // ------------------------------
 // COMMUNICATION
 // ------------------------------
 
-bool MessageQueueClient::send_message(int sock, const std::string &data) {
+bool MessageQueueClient::_send_message(int sock, const std::string &data) {
     if (sock < 0) return false;
 
     size_t total_sent = 0;
@@ -180,7 +186,7 @@ bool MessageQueueClient::send_message(int sock, const std::string &data) {
     return true;
 }
 
-bool MessageQueueClient::read_exactly(int sock, char *buffer, size_t size) {
+bool MessageQueueClient::_read_exactly(int sock, char *buffer, size_t size) {
     if (sock < 0) return false;
 
     size_t total_read = 0;
@@ -196,8 +202,9 @@ bool MessageQueueClient::read_exactly(int sock, char *buffer, size_t size) {
 void MessageQueueClient::_receiver_loop() {
     char header_buffer[HEADER_PACKET_SIZE];
 
-    while (_connected) {
-        if (!read_exactly(_socket, header_buffer, HEADER_PACKET_SIZE))
+    while (_connected.load()) {
+        if (_socket == -1) break;
+        if (!_read_exactly(_socket, header_buffer, HEADER_PACKET_SIZE))
         {
             _handle_disconnect_event();
             break;
@@ -214,7 +221,7 @@ void MessageQueueClient::_receiver_loop() {
         if (payload_len > 0)
         {
             payload.resize(payload_len);
-            if (!read_exactly(_socket, payload.data(), payload_len))
+            if (!_read_exactly(_socket, payload.data(), payload_len))
             {
                 _handle_disconnect_event();
                 break;
@@ -228,8 +235,8 @@ void MessageQueueClient::_receiver_loop() {
 
 void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &payload, Event &ev) {
     if (ev.is_heartbeat(role, cmd)) {
-        std::string heartbeat = Protocol::prepare_message('H', 'B', "");
-        send_message(_socket, heartbeat);
+        std::string heartbeat = Protocol::_prepare_message('H', 'B', "");
+        _send_message(_socket, heartbeat);
         return;
     }
     if (ev.is_initial_queue_list(role, cmd)) {
@@ -283,6 +290,9 @@ void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &pay
         _event_queue.push(std::move(ev));
         _event_cv.notify_one();
     }
+
+    //? What if no condition is met?
+    //? Uninitialized type? - maybe do NONE?
 }
 
 
