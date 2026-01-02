@@ -33,7 +33,7 @@ inline std::map<std::string, char> client_action_map = {
 // @param queue_name (queue_name_len bytes)
 // @param message (remaining bytes)
 class Protocol {
-public:
+ public:
     static std::string prepare_message(char role, char cmd, const std::string &payload);
 
  private:
