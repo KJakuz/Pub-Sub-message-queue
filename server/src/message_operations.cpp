@@ -2,7 +2,6 @@
 #include <sys/socket.h>
 #include <iomanip>
 #include <sstream>
-#include <iostream>
 #include <algorithm>
 
 
@@ -357,6 +356,14 @@ void publish_message_to_queue(const Client& client, const std::string& content) 
     std::string queue_name = content.substr(8, queue_name_size);
     std::string message_body = content.substr(8 + queue_name_size);
     auto msg_expire= std::chrono::steady_clock::now() + std::chrono::seconds(ttl);
+
+    if(message_body.size() < 1){
+        if(!send_message(client.socket, prepare_message("PB", "ER:MESSAGE_TOO_SHORT"))){
+            safe_error("SEND_ERROR: PB:ER to " + client.id);
+        }
+        return;
+    }
+
 
     std::vector<int> subscribers_sockets;
     bool valid_op = false;

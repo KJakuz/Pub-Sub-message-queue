@@ -5,6 +5,7 @@
 #include <cstring>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <map>
 
 std::string prepare_message(const std::string &message_type, const std::string &payload) {
     std::string buf;
@@ -69,10 +70,18 @@ bool send_message(int sock, const std::string &data) {
     
     if (sock == -1) return false;
 
-    //sending to the same socket at the same time is not allowed valgrind gives errors
-    static std::mutex socket_locks[1024];
-    std::lock_guard<std::mutex> lock(socket_locks[sock % 1024]);
+    //mutex for each socket
+    static std::mutex map_mtx;
+    static std::map<int, std::mutex> socket_mtx;
 
+    std::mutex* m;
+    { 
+        std::lock_guard lock(map_mtx); 
+        m = &socket_mtx[sock]; 
+    }
+    std::lock_guard lock(*m);
+
+    //send data
     size_t total_sent = 0;
     size_t data_len = data.size();
     const char *raw_data = data.data();

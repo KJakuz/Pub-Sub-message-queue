@@ -9,9 +9,9 @@
 #include <cstring>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <tuple>
 
 #define PACKET_HEADER_SIZE 6
-#define WITH_ENDLINES 0
 #define SECONDS_TO_CLEAR_CLIENT 30
 #define CLIENT_READ_TIMEOUT 45
 #define HEARTBEAT_INTERVAL 30

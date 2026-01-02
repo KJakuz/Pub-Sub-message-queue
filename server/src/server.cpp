@@ -4,17 +4,15 @@
 
 #include <stdio.h>
 #include <sys/socket.h>
-#include <arpa/inet.h>
 #include <netinet/in.h>
 
 #include <thread>
 #include <chrono>
 #include <csignal>
 #include <atomic>
-#include <tuple>
-#include <unistd.h>
 #include <netdb.h>
 #include <algorithm>
+#include <list>
 
 std::atomic<bool> running(true);
 std::atomic<int> listening_socket_global(-1);
@@ -22,9 +20,11 @@ std::atomic<int> listening_socket_global(-1);
 std::mutex clients_mutex;
 std::mutex queues_mutex;
 std::mutex log_mutex;
+std::mutex threads_mutex;
 
 std::unordered_map<std::string, Client> clients;
 std::unordered_map<std::string, Queue> existing_queues;
+std::list<std::thread> client_threads;
 
 
 void safe_print(const std::string& msg) {
@@ -148,7 +148,7 @@ void handle_client(int client_socket){
         }
         else if (status < 0) {
             safe_error("ERROR MESSAGE NOT VALID FROM SOCKET:" + std::to_string(client.socket));
-            break;
+            continue;
         }
 
         //if client not logged in yet
@@ -258,6 +258,7 @@ int main(int argc, char  **argv){
     // Start worker thread
     std::thread worker(cleanup_worker);
 
+    //accept clients
     while(running){ 
         int client_socket = accept(listening_socket, NULL, NULL);
         if(client_socket == -1){
@@ -266,8 +267,26 @@ int main(int argc, char  **argv){
             }
             break;
         }
-        std::thread t(handle_client, client_socket);
-        t.detach();
+        std::lock_guard<std::mutex> lock(threads_mutex);
+        client_threads.emplace_back(handle_client, client_socket);
+    }
+
+    //cleanup clients, join threads, close listening socket
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        for(auto& [id, client] : clients){
+            if(client.socket != -1) {
+                shutdown(client.socket, SHUT_RDWR);
+            }
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(threads_mutex);
+        for(auto& t : client_threads){
+            if(t.joinable()) t.join();
+        }
+        client_threads.clear();
     }
 
     worker.join();
@@ -275,8 +294,9 @@ int main(int argc, char  **argv){
     {
         std::lock_guard<std::mutex> lock(clients_mutex);
         for(auto& [id, client] : clients){
-            shutdown(client.socket, SHUT_RDWR);
-            close(client.socket);
+            if(client.socket != -1) {
+                close(client.socket);
+            }
         }
         clients.clear();
     }
