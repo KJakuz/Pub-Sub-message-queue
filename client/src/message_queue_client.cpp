@@ -1,5 +1,6 @@
 #include "MessageQueueClient.h"
 #include "Protocol.h"
+#include "Helpers.h"
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -10,6 +11,7 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+#include <cctype>
 
 std::mutex cout_mutex;
 
@@ -134,6 +136,7 @@ bool MessageQueueClient::_verify_connection() {
 // ------------------------------
 
 bool MessageQueueClient::create_queue(const std::string &queue_name) {
+    if (!_is_valid_queue_name(queue_name)) return false;
     std::string message = Protocol::_prepare_message(Role::Publisher, Action::Create, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
@@ -143,10 +146,9 @@ bool MessageQueueClient::delete_queue(const std::string &queue_name) {
     return MessageQueueClient::_send_message(_socket, message);
 }
 
-bool MessageQueueClient::publish(const std::string &queue_name, const std::string &content, int ttl) {
-    if (ttl < 0) {
-        return false;
-    }
+bool MessageQueueClient::publish(const std::string &queue_name, const std::string &content, uint32_t ttl) {
+    if (!_is_valid_ttl(ttl)) return false;
+
     std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, ttl);
     std::string message = Protocol::_prepare_message(Role::Publisher, Action::Publish, internal_payload);
     return MessageQueueClient::_send_message(_socket, message);

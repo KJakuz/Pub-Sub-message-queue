@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Event.h"
+#include "Helpers.h"
 
 #include <string>
 #include <map>
@@ -69,7 +70,7 @@ class MessageQueueClient {
 
     bool create_queue(const std::string &queue_name);
     bool delete_queue(const std::string &queue_name);
-    bool publish(const std::string &queue_name, const std::string &content, int ttl);
+    bool publish(const std::string &queue_name, const std::string &content, uint32_t ttl);
 
     bool subscribe(const std::string &queue_name);
     bool unsubscribe(const std::string &queue_name);

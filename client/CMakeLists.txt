@@ -11,6 +11,7 @@ find_package(Threads REQUIRED)
 set(LIB_SOURCES 
     src/message_queue_client.cpp 
     src/protocol.cpp
+    src/helpers.cpp
 )
 
 add_library(mq_client SHARED ${LIB_SOURCES})
