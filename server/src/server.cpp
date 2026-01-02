@@ -28,13 +28,17 @@ std::unordered_map<std::string, Queue> existing_queues;
 
 
 void safe_print(const std::string& msg) {
-    std::lock_guard<std::mutex> lock(log_mutex);
-    std::cout << msg << std::endl;
+    if(LOGS){
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::cout << msg << std::endl;
+    }
 }
 
 void safe_error(const std::string& msg) {
-    std::lock_guard<std::mutex> lock(log_mutex);
-    std::cerr << msg << std::endl;
+    if(LOGS){
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::cerr << msg << std::endl;
+    }
 }
 
 void cleanup_worker() {
@@ -126,16 +130,25 @@ void handle_client(int client_socket){
         std::tie(status, msg_type, msg_content) = recv_message(client_socket);
         
         if (status == 0) {
-            safe_print(client.id + " disconnected");
+            safe_print("socket:"+ std::to_string(client.socket) +"  client id:"+(client.id.empty() ? "Unknown" : client.id) + "  disconnected");
             break;
         }
         else if (status < 0 && msg_type.empty()) {
-            safe_error("recv error from socket " + std::to_string(client_socket));
+            if (errno == ECONNRESET) {
+                 safe_print((client.id.empty() ? "Unknown" : client.id) + " disconnected abruptly (ECONNRESET)");
+            } else {
+                 safe_error("recv error from socket " + std::to_string(client_socket) + " (errno=" + std::to_string(errno) + ")");
+            }
             break;
+        }
+        else if (status == -2) {
+             safe_error("Client " + (client.id.empty() ? "Unknown" : client.id) + " tried to send too huge message");
+             send_message(client_socket, prepare_message(msg_type, "ER:MSG_TOO_BIG"));
+             break;
         }
         else if (status < 0) {
             safe_error("ERROR MESSAGE NOT VALID FROM SOCKET:" + std::to_string(client.socket));
-            continue;
+            break;
         }
 
         //if client not logged in yet
@@ -204,6 +217,7 @@ int main(int argc, char  **argv){
     }
 
     signal(SIGINT, signal_handler);
+    signal(SIGPIPE, SIG_IGN);
 
     struct addrinfo hints{}, *res;
     hints.ai_family = AF_INET;

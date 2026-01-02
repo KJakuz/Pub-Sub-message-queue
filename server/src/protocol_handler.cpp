@@ -44,7 +44,7 @@ std::tuple<int, std::string, std::string> recv_message(int sock) {
     uint32_t payload_size = ntohl(network_len);
     
     //100MB limit
-    if (payload_size > 100 * 1024 * 1024) return {-1, "", ""};
+    if (payload_size > 100 * 1024 * 1024) return {-2, msg_type, ""};
     
     std::string msg_content;
     if (payload_size > 0) {
@@ -66,6 +66,7 @@ std::tuple<int, std::string, std::string> recv_message(int sock) {
 }
 
 bool send_message(int sock, const std::string &data) {
+    
     if (sock == -1) return false;
 
     //sending to the same socket at the same time is not allowed valgrind gives errors
@@ -77,11 +78,14 @@ bool send_message(int sock, const std::string &data) {
     const char *raw_data = data.data();
 
     while (total_sent < data_len) {
-        ssize_t sent = send(sock, raw_data + total_sent, data_len - total_sent, 0);
+        ssize_t sent = send(sock, raw_data + total_sent, data_len - total_sent, MSG_NOSIGNAL);
         if (sent <= 0) { 
+            if (sent == -1 && errno != EPIPE && errno != ECONNRESET && errno != EBADF) {
+                safe_error("send error errno=" + std::to_string(errno) + " sock=" + std::to_string(sock));
+            }
             return false;
         }
         total_sent += sent;
     }
     return true;
-}
+}   

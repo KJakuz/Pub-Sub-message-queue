@@ -16,6 +16,7 @@
 #define CLIENT_READ_TIMEOUT 45
 #define HEARTBEAT_INTERVAL 30
 #define DEBUG 0
+#define LOGS 1
 
 struct Message {
     std::string text;
