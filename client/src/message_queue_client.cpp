@@ -71,19 +71,19 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
 }
 
 void MessageQueueClient::disconnect() {
-    _connected.store(false);
+    if (!_connected.exchange(false)) return; 
+
     if (_socket != -1) {
+        _socket = -1;
         shutdown(_socket, SHUT_RDWR);
         if (_receiver_thread.joinable()) _receiver_thread.join();
         close(_socket);
-        _socket = -1;
     }
 }
 
 void MessageQueueClient::_handle_disconnect_event() {
     if(!_connected.load()) return; // We don't bother with handling event when we are disconnecting
 
-    _connected.store(false);
     Event ev;
     ev._type = Event::Type::Disconnected;
     ev._result.push_back("Connection lost.");
@@ -290,9 +290,6 @@ void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &pay
         _event_queue.push(std::move(ev));
         _event_cv.notify_one();
     }
-
-    //? What if no condition is met?
-    //? Uninitialized type? - maybe do NONE?
 }
 
 

@@ -5,7 +5,7 @@
 #include <string>
 
 constexpr size_t HEADER_PACKET_SIZE = 6;
-constexpr uint32_t MAX_PAYLOAD = 1 * 1024 * 1024;
+constexpr uint32_t MAX_PAYLOAD = 10;
 
 inline std::map<std::string, char> client_role_map = {
     {"PUBLISHER", 'P'},

@@ -21,7 +21,8 @@ class Event {
         BatchMessages,
         Disconnected,
         Error,
-        StatusUpdate
+        StatusUpdate,
+        Unknown
     };
 
     Type type() const { return _type; }
@@ -34,14 +35,14 @@ class Event {
     const std::vector<std::string> &items() const { return _result; }
 
  private:
-    Type _type;
+    Type _type = Type::Unknown;
     std::string _source;
     std::vector<std::string> _result;
 
 
     // Helper event dispatch methods
 
-    bool is_valid() const { return _type != Type::Disconnected; }
+    bool is_valid() const { return _type != Type::Disconnected && _type != Type::Unknown; }
     bool is_heartbeat(char &role, char &cmd) { return role == 'H' && cmd == 'B'; }
     bool is_initial_queue_list(char &role, char &cmd) { return role == 'I' && cmd == 'N'; }
     bool is_update_queue_list(char &role, char &cmd) { return role == 'Q' && cmd == 'L'; }
