@@ -83,7 +83,7 @@ void cleanup_worker() {
         
         //send heartbeat to alive clients
         for (int socket : alive_sockets) {
-            send_message(socket, prepare_message("HB", ""));
+            send_message(socket, prepare_message(message_type::HEARTBEAT, ""));
         }
         
         //messages cleanup after ttl expire
@@ -131,7 +131,8 @@ void handle_client(int client_socket){
 
     while(running){
         recv_status status;
-        std::string msg_type, msg_content;
+        message_type msg_type;
+        std::string msg_content;
         std::tie(status, msg_type, msg_content) = recv_message(client_socket);
         
         if (status == recv_status::DISCONNECT) {
@@ -158,39 +159,39 @@ void handle_client(int client_socket){
         
         //if client not logged in yet
         if(client.id.empty()){
-            if(msg_type == "LO"){
+            if(msg_type == message_type::LOGIN){
                 client.socket = client_socket;
                 client = get_client_id(client, msg_content);
                 send_single_queue_list(client);
             }
             else{
-                if(!send_message(client.socket, prepare_message("LO","ER:FIRST YOU MUST LOG IN"))){
+                if(!send_message(client.socket, prepare_message(message_type::LOGIN,"ER:FIRST_YOU_MUST_LOG_IN"))){
                     safe_error("ERROR SENDING MESSAGE LO:ER TO SOCKET:" + std::to_string(client.socket));
                 }
             }
         }
         else //client logged in
         {
-            if(msg_type == "HB"){ //sends heartbeat to client
+            if(msg_type == message_type::HEARTBEAT){ //sends heartbeat to client
                 continue;
             }
-            else if(msg_type == "SS"){
+            else if(msg_type == message_type::SUBSCRIBE){
                 subscribe_to_queue(client, msg_content);
             }
-            else if(msg_type == "SU"){
+            else if(msg_type == message_type::UNSUBSCRIBE){
                 unsubscribe_from_queue(client,msg_content);
             }
-            else if(msg_type == "PC"){
+            else if(msg_type == message_type::QUEUE_CREATE){
                 create_queue(client,msg_content);
             }
-            else if(msg_type == "PD"){
+            else if(msg_type == message_type::QUEUE_DELETE){
                 delete_queue(client,msg_content);
             }
-            else if(msg_type == "PB"){
+            else if(msg_type == message_type::PUBLISH){
                 publish_message_to_queue(client,msg_content);
             }
-            else if(msg_type == "LO"){
-                if(!send_message(client.socket, prepare_message("LO","ER:USER_ID_ALREADY_GIVEN"))){
+            else if(msg_type == message_type::LOGIN){
+                if(!send_message(client.socket, prepare_message(message_type::LOGIN,"ER:USER_ID_ALREADY_GIVEN"))){
                     safe_error("ERROR SENDING MESSAGE LO:ER TO " + client.id);
                 }
             }

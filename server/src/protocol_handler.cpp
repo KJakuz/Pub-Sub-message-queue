@@ -7,10 +7,11 @@
 #include <unistd.h>
 #include <map>
 
-std::string prepare_message(const std::string &message_type, const std::string &payload) {
+std::string prepare_message(message_type message_type, const std::string &payload) {
     std::string buf;
+    std::string type_str = MSG_TYPE_TO_STR.at(message_type);
     buf.reserve(PACKET_HEADER_SIZE + payload.size());
-    buf += message_type;
+    buf += type_str;
     uint32_t len = htonl(static_cast<uint32_t>(payload.size()));
     buf.append(reinterpret_cast<const char *>(&len), sizeof(len));
     buf.append(payload);
@@ -30,18 +31,26 @@ static ssize_t recv_exact(int sock, char* buffer, size_t n) {
 }
 
 
-std::tuple<recv_status, std::string, std::string> recv_message(int sock) {
+std::tuple<recv_status, message_type, std::string> recv_message(int sock) {
     //receive header
     char header[PACKET_HEADER_SIZE];
     ssize_t header_result = recv_exact(sock, header, PACKET_HEADER_SIZE);
     if (header_result == 0){ 
-        return {recv_status::DISCONNECT, "", ""};  
+        return {recv_status::DISCONNECT, message_type::ERROR, ""};  
     }
     else if (header_result < 0){ 
-        return {recv_status::NETWORK_ERROR, "", ""};  
+        return {recv_status::NETWORK_ERROR, message_type::ERROR, ""};  
     }
     
-    std::string msg_type(header, 2);
+    std::string msg_type_str(header, 2);
+    message_type msg_type;
+    if(STR_TO_MSG_TYPE.contains(msg_type_str)){
+        msg_type = STR_TO_MSG_TYPE.at(msg_type_str);
+    }
+    else{
+        return {recv_status::PROTOCOL_ERROR, message_type::ERROR, ""};
+    }
+    
     uint32_t network_len;
     std::memcpy(&network_len, header + 2, sizeof(uint32_t));
     uint32_t payload_size = ntohl(network_len);
@@ -57,7 +66,7 @@ std::tuple<recv_status, std::string, std::string> recv_message(int sock) {
         msg_content.resize(payload_size);
         ssize_t payload_result = recv_exact(sock, msg_content.data(), payload_size);
         if (payload_result == 0) {
-            return {recv_status::DISCONNECT, "", ""};
+            return {recv_status::DISCONNECT, message_type::ERROR, ""};
         }
         else if (payload_result < 0) {
             return {recv_status::NETWORK_ERROR, msg_type, ""};
@@ -65,12 +74,11 @@ std::tuple<recv_status, std::string, std::string> recv_message(int sock) {
     }
     
     if (DEBUG == 1){
-        safe_print("DEBUG: TYPE: " + msg_type + " SIZE: " + std::to_string(payload_size) + " CONTENT: " + msg_content);
+        safe_print("DEBUG: TYPE: " + msg_type_str + " SIZE: " + std::to_string(payload_size) + " CONTENT: " + msg_content);
     }
     
     //check if message is valid
-    if (msg_type == "LO" || msg_type == "SS" || msg_type == "SU" || 
-        msg_type == "PC" || msg_type == "PD" || msg_type == "PB" || msg_type == "HB") {
+    if (msg_type != message_type::ERROR) {
         return {recv_status::SUCCESS, msg_type, msg_content};
     }
     return {recv_status::PROTOCOL_ERROR, msg_type, ""};
