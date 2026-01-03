@@ -13,7 +13,7 @@
 #include <cstring>
 #include <arpa/inet.h>
 
-constexpr size_t SOCKET_TIMEOUT_VALUE = 1;
+constexpr size_t SOCKET_TIMEOUT_VALUE = 35;
 
 // @class MessageQueueClient
 // @brief Client for interacting with a message queue server.
@@ -146,10 +146,20 @@ private:
 
     // @brief Verify server connection via handshake.
     //
-    // Seends a login message and expects an OK response.
+    // Sends a login message and expects an OK response.
     // @return true if verification succeeded.
     bool _verify_connection();
-    void _handle_disconnect_event(const std::string reason);
+
+    // @brief Handle incorrect server response.
+    //
+    // @param reason Content of created event with reason of Error.
+    // @param is_fatal If is_fatal is true then Disconnect, otherwise
+    // treat it like an Error.
+    //
+    // Server ansers with specified error as ER: are
+    // handled in dispatch_event(). This function create
+    // Error or Disconnect event when client get harmful response.
+    void _handle_error_event(const std::string &reason, bool is_fatal);
 
     void _dispatch_event(char &role, char &cmd, std::string &payload, Event &ev);
 };

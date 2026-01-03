@@ -55,7 +55,7 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
     constexpr int reuse{1};
     setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
     struct timeval tv;
-    tv.tv_sec = 2;  // Reduced from SOCKET_TIMEOUT_VALUE (was 5 seconds)
+    tv.tv_sec = SOCKET_TIMEOUT_VALUE;
     tv.tv_usec = 0;
     setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
 
@@ -87,11 +87,17 @@ void MessageQueueClient::disconnect() {
     if (_receiver_thread.joinable()) _receiver_thread.join();
 }
 
-void MessageQueueClient::_handle_disconnect_event(std::string reason) {
+void MessageQueueClient::_handle_error_event(const std::string &reason, bool is_fatal) {
     if(!_connected.load()) return; // We don't bother with handling event when we are disconnecting
 
     Event ev;
-    ev._type = Event::Type::Disconnected;
+    if (is_fatal) {
+        ev._type = Event::Type::Disconnected;
+        _connected.store(false);
+    }
+    else {
+        ev._type = Event::Type::Error;
+    }
     ev._result.push_back(reason);
 
     {
@@ -140,8 +146,7 @@ bool MessageQueueClient::_verify_connection() {
 // ------------------------------
 
 bool MessageQueueClient::create_queue(const std::string &queue_name) {
-    if (!_connected.load()) return false;
-    if (!_is_valid_queue_name(queue_name)) return false;
+    if (!_connected.load() || !_is_valid_queue_name(queue_name)) return false;
     std::string message = Protocol::_prepare_message(Role::Publisher, Action::Create, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
@@ -207,14 +212,20 @@ void MessageQueueClient::_receiver_loop() {
     while (_connected.load()) {
         if (_socket.load() == -1) break;
         if (!_read_exactly(_socket, header_buffer, HEADER_PACKET_SIZE)) {
-            _handle_disconnect_event("Reading packet failed.");
+            _handle_error_event("Reading packet failed.", true);
             break;
         }
         auto [role, cmd, payload_len] = Protocol::_decode_packet(std::string(header_buffer, HEADER_PACKET_SIZE));
 
         if (payload_len > MAX_PAYLOAD) {
-            _handle_disconnect_event("Payload too big");
-            break;
+            _handle_error_event("Payload too big", false);
+            std::string discard;
+            discard.resize(payload_len);
+            if (!_read_exactly(_socket, discard.data(), payload_len)) {
+                _handle_error_event("Failed to read oversized payload", true);
+                break;
+            }
+            continue;
         }
 
         std::string payload;
@@ -223,7 +234,7 @@ void MessageQueueClient::_receiver_loop() {
             payload.resize(payload_len);
             if (!_read_exactly(_socket, payload.data(), payload_len))
             {
-                _handle_disconnect_event("Read exactly failed.");
+                _handle_error_event("Read exactly failed.", true);
                 break;
             }
         }
@@ -302,17 +313,8 @@ void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &pay
 // ------------------------------
 
 std::tuple<std::string, std::string> MessageQueueClient::_handle_message_payload(const std::string &payload) {
-    if (payload.size() < 4) {
-        thread_safe_print("DEBUG: Incorrect message from server.");
-    }
-
     uint32_t q_name_size;
     extract_convert_net_to_host(payload, 0, q_name_size);
-
-    if (4 + q_name_size > payload.size()) {
-        thread_safe_print("DEBUG: Queue name exceeds data length.");
-    }
-
     std::string queue_name = payload.substr(4, q_name_size);
     std::string message_content = payload.substr(4 + q_name_size);
 
@@ -321,8 +323,6 @@ std::tuple<std::string, std::string> MessageQueueClient::_handle_message_payload
 
 std::vector<std::string> MessageQueueClient::_handle_queue_list_payload(const std::string &payload) {
     std::vector<std::string> queues;
-    if (payload.size() < 4) return queues;
-
     uint32_t count_net;
     extract_convert_net_to_host(payload, 0, count_net);
 
