@@ -85,13 +85,12 @@ std::tuple<recv_status, message_type, std::string> recv_message(int sock) {
 }
 
 bool send_message(int sock, const std::string &data) {
-    //client inactive
-    if (sock == -1) return false;
-
     //mutex for each socket
     std::mutex* m;
     { 
         std::lock_guard<std::mutex> lock(socket_map_mutex); 
+        //client inactive
+        if (sock == -1) return false;
         m = &socket_mutexes[sock]; 
     }
     std::lock_guard<std::mutex> lock(*m);

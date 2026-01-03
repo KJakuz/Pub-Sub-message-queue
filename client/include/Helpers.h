@@ -1,6 +1,10 @@
 #pragma once
 
 #include <string>
+#include <cstdint>
+#include <algorithm>
+#include <cstring>
+#include <arpa/inet.h>
 
 // @brief Check if queue name is valid.
 //

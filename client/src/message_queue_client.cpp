@@ -43,7 +43,10 @@ MessageQueueClient::~MessageQueueClient() {
 // ------------------------------
 
 bool MessageQueueClient::connect_to_server(const std::string &host, const std::string &port) {
-    addrinfo hints{ .ai_family = AF_INET, .ai_socktype = SOCK_STREAM, .ai_protocol = IPPROTO_TCP }, *res{};
+    addrinfo hints{}, *res{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
     if (int err = getaddrinfo(host.c_str(), port.c_str(), &hints, &res)) {
         thread_safe_print(gai_strerror(err));
         return false;
