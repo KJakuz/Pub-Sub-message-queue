@@ -279,6 +279,10 @@ void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &pay
         ev._type = Event::Type::Error;
         ev._result.push_back("Queue Deleted: " + payload);
     }
+    else {
+        ev._type = Event::Type::Error;
+        ev._result.push_back("Unknown message type: [" + std::string(1, role) + std::string(1, cmd) + "]");
+    }
 
     if (ev.is_valid()) {
         std::lock_guard<std::mutex> lock(_event_mutex);

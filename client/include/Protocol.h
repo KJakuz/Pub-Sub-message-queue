@@ -39,7 +39,7 @@ class Protocol {
 
  private:
     static std::string _prepare_message(char role, char cmd, const std::string &payload);
-    static std::string _pack_publish_data(const std::string &queue_name, const std::string &content, const int ttl); // todo no need for ttl to be int it is greater tha 0 always
+    static std::string _pack_publish_data(const std::string &queue_name, const std::string &content, const uint32_t ttl);
     static std::tuple<char, char, uint32_t> _decode_packet(const std::string &message);
 
     friend class MessageQueueClient;

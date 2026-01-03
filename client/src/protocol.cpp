@@ -11,7 +11,7 @@ std::string Protocol::_prepare_message(char role, char cmd, const std::string &p
     return buf;
 }
 
-std::string Protocol::_pack_publish_data(const std::string &queue_name, const std::string &content, const int ttl) {
+std::string Protocol::_pack_publish_data(const std::string &queue_name, const std::string &content, const uint32_t ttl) {
     std::string internal_payload;
     internal_payload.reserve(sizeof(int) + sizeof(int) + content.size());
 
