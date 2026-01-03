@@ -13,8 +13,9 @@ bool _is_valid_queue_name(const std::string &name) {
         return false;
 
     // Check for allowed characters
-    auto it = std::find_if(name.begin(), name.end(), [](char c)
-                           { return !(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-'); });
+    auto it = std::find_if(name.begin(), name.end(), [](char c) { 
+        return !(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-');
+    });
     return it == name.end();
 }
 

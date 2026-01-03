@@ -103,15 +103,21 @@ int main(int argc, char *argv[])
         }
         else if (cmd == "create" && !arg1.empty())
         {
-            client.create_queue(arg1);
+            if (!client.create_queue(arg1)) {
+                std::cout << "[ERROR] Invalid queue name.\n";
+            }
         }
         else if (cmd == "sub" && !arg1.empty())
         {
-            client.subscribe(arg1);
+            if (!client.subscribe(arg1)) {
+                std::cout << "[ERROR] Failed to subscribe to queue.\n";
+            }
         }
         else if (cmd == "unsub" && !arg1.empty())
         {
-            client.unsubscribe(arg1);
+            if (!client.unsubscribe(arg1)) {
+                std::cout << "[ERROR] Failed to unsubscribe from queue.\n";
+            }
         }
         else if (cmd == "pub" && !arg1.empty())
         {
