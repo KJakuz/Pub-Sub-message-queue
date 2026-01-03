@@ -5,11 +5,13 @@
 #include <cstring>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <map>
 
-std::string prepare_message(const std::string &message_type, const std::string &payload) {
+std::string prepare_message(message_type message_type, const std::string &payload) {
     std::string buf;
+    std::string type_str = MSG_TYPE_TO_STR.at(message_type);
     buf.reserve(PACKET_HEADER_SIZE + payload.size());
-    buf += message_type;
+    buf += type_str;
     uint32_t len = htonl(static_cast<uint32_t>(payload.size()));
     buf.append(reinterpret_cast<const char *>(&len), sizeof(len));
     buf.append(payload);
@@ -21,7 +23,6 @@ static ssize_t recv_exact(int sock, char* buffer, size_t n) {
     while (total_received < n) {
         ssize_t received = recv(sock, buffer + total_received, n - total_received, 0);
         if (received <= 0) {
-            //0 = disconnect, -1 = error
             return received;
         }
         total_received += received;
@@ -30,58 +31,85 @@ static ssize_t recv_exact(int sock, char* buffer, size_t n) {
 }
 
 
-std::tuple<int, std::string, std::string> recv_message(int sock) {
-    //status: succes = 1, disconnect = 0, error = -1
+std::tuple<recv_status, message_type, std::string> recv_message(int sock) {
+    //receive header
     char header[PACKET_HEADER_SIZE];
     ssize_t header_result = recv_exact(sock, header, PACKET_HEADER_SIZE);
+    if (header_result == 0){ 
+        return {recv_status::DISCONNECT, message_type::ERROR, ""};  
+    }
+    else if (header_result < 0){ 
+        return {recv_status::NETWORK_ERROR, message_type::ERROR, ""};  
+    }
     
-    if (header_result == 0) return {0, "", ""};  
-    if (header_result < 0) return {-1, "", ""};  
+    std::string msg_type_str(header, 2);
+    message_type msg_type;
+    if(STR_TO_MSG_TYPE.contains(msg_type_str)){
+        msg_type = STR_TO_MSG_TYPE.at(msg_type_str);
+    }
+    else{
+        return {recv_status::PROTOCOL_ERROR, message_type::ERROR, ""};
+    }
     
-    std::string msg_type(header, 2);
     uint32_t network_len;
     std::memcpy(&network_len, header + 2, sizeof(uint32_t));
     uint32_t payload_size = ntohl(network_len);
     
-    //TODO:maybe limit?
-    if (payload_size > 10 * 1024 * 1024) return {-1, "", ""};
-    
+    //10MB limit
+    if (payload_size > MAX_PAYLOAD_SIZE_MB * 1024 * 1024) {
+        return {recv_status::PAYLOAD_TOO_LARGE, msg_type, ""};
+    }
+
+    //receive payload
     std::string msg_content;
     if (payload_size > 0) {
         msg_content.resize(payload_size);
         ssize_t payload_result = recv_exact(sock, msg_content.data(), payload_size);
-        if (payload_result == 0) return {0, "", ""};
-        if (payload_result < 0) return {-1, "", ""};
+        if (payload_result == 0) {
+            return {recv_status::DISCONNECT, message_type::ERROR, ""};
+        }
+        else if (payload_result < 0) {
+            return {recv_status::NETWORK_ERROR, msg_type, ""};
+        }
     }
     
     if (DEBUG == 1){
-        safe_print("DEBUG: TYPE: " + msg_type + " SIZE: " + std::to_string(payload_size) + " CONTENT: " + msg_content);
+        safe_print("DEBUG: TYPE: " + msg_type_str + " SIZE: " + std::to_string(payload_size) + " CONTENT: " + msg_content);
     }
     
-    if (msg_type == "LO" || msg_type == "SS" || msg_type == "SU" || 
-        msg_type == "PC" || msg_type == "PD" || msg_type == "PB" || msg_type == "HB") {
-        return {1, msg_type, msg_content};
+    //check if message is valid
+    if (msg_type != message_type::ERROR) {
+        return {recv_status::SUCCESS, msg_type, msg_content};
     }
-    return {-1, msg_type, msg_content};
+    return {recv_status::PROTOCOL_ERROR, msg_type, ""};
 }
 
 bool send_message(int sock, const std::string &data) {
+    //client inactive
     if (sock == -1) return false;
 
-    //sending to the same socket at the same time is not allowed valgrind gives errors
-    static std::mutex socket_locks[1024];
-    std::lock_guard<std::mutex> lock(socket_locks[sock % 1024]);
+    //mutex for each socket
+    std::mutex* m;
+    { 
+        std::lock_guard<std::mutex> lock(socket_map_mutex); 
+        m = &socket_mutexes[sock]; 
+    }
+    std::lock_guard<std::mutex> lock(*m);
 
+    //send data
     size_t total_sent = 0;
     size_t data_len = data.size();
     const char *raw_data = data.data();
 
     while (total_sent < data_len) {
-        ssize_t sent = send(sock, raw_data + total_sent, data_len - total_sent, 0);
+        ssize_t sent = send(sock, raw_data + total_sent, data_len - total_sent, MSG_NOSIGNAL);
         if (sent <= 0) { 
+            if (sent == -1 && errno != EPIPE && errno != ECONNRESET && errno != EBADF) {
+                safe_error("send error errno=" + std::to_string(errno) + " sock=" + std::to_string(sock));
+            }
             return false;
         }
         total_sent += sent;
     }
     return true;
-}
+}   

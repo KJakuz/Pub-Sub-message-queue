@@ -4,17 +4,15 @@
 
 #include <stdio.h>
 #include <sys/socket.h>
-#include <arpa/inet.h>
 #include <netinet/in.h>
 
 #include <thread>
 #include <chrono>
 #include <csignal>
 #include <atomic>
-#include <tuple>
-#include <unistd.h>
 #include <netdb.h>
 #include <algorithm>
+#include <list>
 
 std::atomic<bool> running(true);
 std::atomic<int> listening_socket_global(-1);
@@ -22,18 +20,27 @@ std::atomic<int> listening_socket_global(-1);
 std::mutex clients_mutex;
 std::mutex queues_mutex;
 std::mutex log_mutex;
+std::mutex threads_mutex;
+std::mutex socket_map_mutex;
+std::map<int, std::mutex> socket_mutexes;
+
 std::unordered_map<std::string, Client> clients;
-std::unordered_map<std::string, Queue> Existing_Queues;
+std::unordered_map<std::string, Queue> existing_queues;
+std::list<std::thread> client_threads;
 
 
 void safe_print(const std::string& msg) {
-    std::lock_guard<std::mutex> lock(log_mutex);
-    std::cout << msg << std::endl;
+    if(LOGS){
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::cout << msg << std::endl;
+    }
 }
 
 void safe_error(const std::string& msg) {
-    std::lock_guard<std::mutex> lock(log_mutex);
-    std::cerr << msg << std::endl;
+    if(LOGS){
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::cerr << msg << std::endl;
+    }
 }
 
 void cleanup_worker() {
@@ -44,7 +51,10 @@ void cleanup_worker() {
         if (!running) break;
         
         heartbeat_counter++;
-        if (heartbeat_counter >= HEARTBEAT_INTERVAL) {
+        if (heartbeat_counter < HEARTBEAT_INTERVAL) {
+            continue;
+        }
+        else{
             heartbeat_counter = 0;   
         }
 
@@ -71,10 +81,15 @@ void cleanup_worker() {
             }
         }
         
-        //messages cleanup
+        //send heartbeat to alive clients
+        for (int socket : alive_sockets) {
+            send_message(socket, prepare_message(message_type::HEARTBEAT, ""));
+        }
+        
+        //messages cleanup after ttl expire
         {
             std::lock_guard<std::mutex> lock(queues_mutex);
-            for (auto& [name, queue] : Existing_Queues) {
+            for (auto& [name, queue] : existing_queues) {
                 auto& msgs = queue.messages;
                 msgs.erase(
                     std::remove_if(msgs.begin(), msgs.end(),
@@ -82,10 +97,6 @@ void cleanup_worker() {
                     msgs.end()
                 );
             }
-        }
-    //send heartbeat to alive clients
-        for (int socket : alive_sockets) {
-            send_message(socket, prepare_message("HB", ""));
         }
     }
 }
@@ -119,57 +130,68 @@ void handle_client(int client_socket){
     client.socket = client_socket;
 
     while(running){
-        int status;
-        std::string msg_type, msg_content;
+        recv_status status;
+        message_type msg_type;
+        std::string msg_content;
         std::tie(status, msg_type, msg_content) = recv_message(client_socket);
         
-        if (status == 0) {
-            safe_print(client.id + " disconnected");
+        if (status == recv_status::DISCONNECT) {
+            safe_print("socket:"+ std::to_string(client.socket) +"  client id:"+ (client.id.empty() ? "Unknown" : client.id) + "  disconnected");
             break;
         }
-        else if (status < 0 && msg_type.empty()) {
-            safe_error("recv error from socket " + std::to_string(client_socket));
+        else if (status == recv_status::NETWORK_ERROR) {
+            if (errno == ECONNRESET) {
+                 safe_print((client.id.empty() ? "Unknown" : client.id) + " disconnected abruptly (ECONNRESET)");
+            } else {
+                 safe_error("recv error from socket " + std::to_string(client_socket) + " (errno=" + std::to_string(errno) + ")");
+            }
             break;
         }
-        else if (status < 0) {
+        else if (status == recv_status::PAYLOAD_TOO_LARGE) {
+             safe_error("Client " + (client.id.empty() ? "Unknown" : client.id) + " tried to send too huge message");
+             send_message(client_socket, prepare_message(msg_type, "ER:MSG_TOO_BIG"));
+             break;
+        }
+        else if (status == recv_status::PROTOCOL_ERROR) {
             safe_error("ERROR MESSAGE NOT VALID FROM SOCKET:" + std::to_string(client.socket));
             continue;
         }
-
+        
+        //if client not logged in yet
         if(client.id.empty()){
-            if(msg_type == "LO"){
+            if(msg_type == message_type::LOGIN){
                 client.socket = client_socket;
                 client = get_client_id(client, msg_content);
                 send_single_queue_list(client);
             }
             else{
-                if(!send_message(client.socket, prepare_message("LO","ER:FIRST YOU MUST LOG IN"))){
+                if(!send_message(client.socket, prepare_message(message_type::LOGIN,"ER:FIRST_YOU_MUST_LOG_IN"))){
                     safe_error("ERROR SENDING MESSAGE LO:ER TO SOCKET:" + std::to_string(client.socket));
                 }
             }
         }
-        else
+        else //client logged in
         {
-            if(msg_type == "HB"){
+            if(msg_type == message_type::HEARTBEAT){ //sends heartbeat to client
                 continue;
             }
-            else if(msg_type == "SS"){
+            else if(msg_type == message_type::SUBSCRIBE){
                 subscribe_to_queue(client, msg_content);
             }
-            else if(msg_type == "SU"){
+            else if(msg_type == message_type::UNSUBSCRIBE){
                 unsubscribe_from_queue(client,msg_content);
             }
-            else if(msg_type == "PC"){
+            else if(msg_type == message_type::QUEUE_CREATE){
                 create_queue(client,msg_content);
             }
-            else if(msg_type == "PD"){
+            else if(msg_type == message_type::QUEUE_DELETE){
                 delete_queue(client,msg_content);
             }
-            else if(msg_type == "PB"){
+            else if(msg_type == message_type::PUBLISH){
                 publish_message_to_queue(client,msg_content);
             }
-            else if(msg_type == "LO"){
-                if(!send_message(client.socket, prepare_message("LO","ER:USER_ID_ALREADY_GIVEN"))){
+            else if(msg_type == message_type::LOGIN){
+                if(!send_message(client.socket, prepare_message(message_type::LOGIN,"ER:USER_ID_ALREADY_GIVEN"))){
                     safe_error("ERROR SENDING MESSAGE LO:ER TO " + client.id);
                 }
             }
@@ -187,6 +209,11 @@ void handle_client(int client_socket){
             safe_print("Client " + client.id + " disconnected (session preserved)");
         }
     }
+
+    {
+        std::lock_guard<std::mutex> lock(socket_map_mutex);
+        socket_mutexes.erase(client_socket);
+    }
     shutdown(client_socket, SHUT_RDWR);
     close(client_socket);
     return;
@@ -201,6 +228,7 @@ int main(int argc, char  **argv){
     }
 
     signal(SIGINT, signal_handler);
+    signal(SIGPIPE, SIG_IGN);
 
     struct addrinfo hints{}, *res;
     hints.ai_family = AF_INET;
@@ -210,6 +238,7 @@ int main(int argc, char  **argv){
     int gai_err = getaddrinfo(NULL, argv[1], &hints, &res);
     if (gai_err != 0) {
         safe_error("getaddrinfo error: " + std::string(gai_strerror(gai_err)));
+        freeaddrinfo(res);
         return -1;
     }
 
@@ -241,6 +270,7 @@ int main(int argc, char  **argv){
     // Start worker thread
     std::thread worker(cleanup_worker);
 
+    //accept clients
     while(running){ 
         int client_socket = accept(listening_socket, NULL, NULL);
         if(client_socket == -1){
@@ -249,8 +279,26 @@ int main(int argc, char  **argv){
             }
             break;
         }
-        std::thread t(handle_client, client_socket);
-        t.detach();
+        std::lock_guard<std::mutex> lock(threads_mutex);
+        client_threads.emplace_back(handle_client, client_socket);
+    }
+
+    //cleanup clients, join threads, close listening socket
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        for(auto& [id, client] : clients){
+            if(client.socket != -1) {
+                shutdown(client.socket, SHUT_RDWR);
+            }
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(threads_mutex);
+        for(auto& t : client_threads){
+            if(t.joinable()) t.join();
+        }
+        client_threads.clear();
     }
 
     worker.join();
@@ -258,8 +306,9 @@ int main(int argc, char  **argv){
     {
         std::lock_guard<std::mutex> lock(clients_mutex);
         for(auto& [id, client] : clients){
-            shutdown(client.socket, SHUT_RDWR);
-            close(client.socket);
+            if(client.socket != -1) {
+                close(client.socket);
+            }
         }
         clients.clear();
     }

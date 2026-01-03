@@ -1,33 +1,114 @@
+/**
+ * @file message_operations.h
+ * @brief Queue and message operations.
+ */
 #ifndef MESSAGE_OPERATIONS_H
 #define MESSAGE_OPERATIONS_H
 
 #include "common.h"
 #include "protocol_handler.h"
 
+//helper functions
 std::unordered_map<std::string, Queue>::iterator find_queue_by_name(const std::string& queue_name);
 bool is_client_subscribed(const Queue& queue, const std::string& client_id);
 std::vector<std::string>::iterator find_subscriber(Queue& queue, const std::string& client_id);
 bool queue_exists(const std::string& queue_name);
 
-void subscribe_to_queue(Client client, std::string queue_name); //RECV QUEUE NAME TO SUBSCRIBE: [SS SIZE QUEUE_NAME]
-void unsubscribe_from_queue(Client client, std::string queue_name); //RECV QUEUE NAME TO UNSUBSCRIBE FROM: [SU SIZE QUEUE_NAME]
-void create_queue(Client client, std::string queue_name); //RECV QUEUE NAME TO CREATE: [PC SIZE QUEUE_NAME]
-void delete_queue(Client client, std::string queue_name); //RECV QUEUE NAME TO DELETE: [PD SIZE QUEUE_NAME]
-void publish_message_to_queue(Client client, std::string content); //RECV SINGLE MESSAGE TO INSERT INTO QUEUE: [PB SIZE QUEUE_NAME]
 
-std::string construct_queue_list(); //PREPARES MESSAGE FOR BROADCAST QUEUES LIST AND SEND SINGLE QUEUE LIST
-void send_single_queue_list(Client client); //SEND QUEUES LIST: [QL SIZE QUEUE_SIZE1 QUEUE_NAME1 ... QUEUE_SIZEn QUEUE_NAMEn]
-void broadcast_queues_list(); //SEND QUEUES LIST: [QL SIZE QUEUE_SIZE1 QUEUE_NAME1 ... QUEUE_SIZEn QUEUE_NAMEn]
-void notify_after_delete(std::vector<std::string>); //SEND NOTIFY AFTER DELETE: [ND SIZE QUEUE_X_WAS_DELETED_YOU_WERE_UNSUBSCRIBED_AUTOMATICALLY]
-void send_published_message(Client client,std::string &queue_name, std::string &content); //SEND SINGLE MESSAGE: [MS SIZE QUEUE_NAME_SIZE QUEUE_NAME CONTENT]
-void send_messages_to_new_subscriber(Client client, std::string queue_name); //SENDS ALL ACTIVE MESSAGES FROM QUEUE: 
-                                                                            //[MA SIZE QUEUE_NAME_SIZE QUEUE_NAME MESSAGE_SIZE1 MESSAGE1 ... MESSAGE_SIZEn MESSAGEn]
+//FUNCTIONS THAT RECEIVE DATA FROM CLIENT AND CHANGE QUEUES OR MESSAGES.
+/**
+ * @brief Subscribes client to queue.
+ * 
+ * Protocol format: [TYPE(2b)][SIZE(4b)][queue_name]
+ * 
+ * @param client Client struct that contains client information
+ * @param queue_name Name of queue to subscribe to
+ */
+void subscribe_to_queue(const Client& client, const std::string& queue_name);
 
+/**
+ * @brief Unsubscribes client from queue.
+ * 
+ * Protocol format: [TYPE(2b)][SIZE(4b)][queue_name]
+ * 
+ * @param client Client struct that contains client information
+ * @param queue_name Name of queue to unsubscribe from
+ */
+void unsubscribe_from_queue(const Client& client, const std::string& queue_name);
 
+/**
+ * @brief Creates new queue.
+ * 
+ * Protocol format: [TYPE(2b)][SIZE(4b)][queue_name]
+ * 
+ * @param client Client struct that contains client information
+ * @param queue_name Name of queue to create
+ */
+void create_queue(const Client& client, const std::string& queue_name);
 
-extern std::mutex clients_mutex;
-extern std::mutex queues_mutex;
-extern std::unordered_map<std::string, Queue> Existing_Queues; 
+/**
+ * @brief Deletes an existing queue.
+ * 
+ * Protocol format: [TYPE(2b)][SIZE(4b)][queue_name]
+ * 
+ * @param client Client struct that contains client information
+ * @param queue_name Name of queue to delete
+ */
+void delete_queue(const Client& client, const std::string& queue_name);
+
+/**
+ * @brief Publishes message to queue.
+ * 
+ * Protocol format: [TYPE(2b)][SIZE(4b)][queue_name_size(4b)][ttl(4b)][queue_name][message]
+ * 
+ * @param client Client struct that contains client information
+ * @param content Content of message to publish (includes queue name, TTL, and message data)
+ */
+void publish_message_to_queue(const Client& client, const std::string& content);
+
+//Build queue list packet
+std::string construct_queue_list();
+//Broadcast queue list to all clients
+void broadcast_queues_list();
+
+//FUNCTIONS THAT ARE SENDING TO CLIENT DATA ABOUT QUEUES OR MESSAGES.
+/**
+ * @brief Sends list of all available queues to client.
+ * 
+ * Protocol format: [TYPE(2b)][SIZE(4b)][queues_count(4b)][queue_name_size(4b)][queue_name][queue_name_size(4b)][queue_name]...
+ * 
+ * @param client Client struct that contains client information
+ */
+void send_single_queue_list(const Client& client);
+
+/**
+ * @brief Sends published message to a subscriber.
+ * 
+ * Protocol format: [TYPE(2b)][SIZE(4b)][queue_name_size(4b)][queue_name][message]
+ * 
+ * @param client Client struct that contains client information
+ * @param queue_name Name of the queue the message was published to
+ * @param content Content of the message to send
+ */
+void send_published_message(const Client& client, const std::string &queue_name, const std::string &content);
+
+/**
+ * @brief Notifies subscribers about queue deletion.
+ * 
+ * Protocol format: [TYPE(2b)][SIZE(4b)][queue_name_size(4b)][queue_name]
+ * 
+ * @param subscriber_ids Vector of subscriber clients IDs to notify
+ */
+void notify_after_delete(const std::vector<std::string>& subscriber_ids, const std::string& queue_name);
+
+/**
+ * @brief Sends all existing messages from a queue to a newly subscribed client.
+ * 
+ * Protocol format: [TYPE(2b)][SIZE(4b)][queue_name_size(4b)][queue_name][message_size(4b)][message][message_size(4b)][message]...
+ * 
+ * @param client Client struct that contains client information
+ * @param queue_name Name of the queue to retrieve messages from
+ */
+void send_messages_to_new_subscriber(const Client& client, const std::string& queue_name);
 
 #endif
-

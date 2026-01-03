@@ -3,7 +3,7 @@
 
 Client get_client_id(Client client, std::string& id) {
     if (id.length() < 2) {
-        if(!send_message(client.socket, prepare_message("LO", "ER:ID_TOO_SHORT"))){
+        if(!send_message(client.socket, prepare_message(message_type::LOGIN, "ER:ID_TOO_SHORT"))){
             safe_error("SEND_ERROR: LO:ER to socket:" + std::to_string(client.socket));
         }
         client.id = "";
@@ -13,8 +13,11 @@ Client get_client_id(Client client, std::string& id) {
     bool reconnected = false;
     bool id_active = false;
     
+    //LOCKS ALWAYS IN THE SAME ORDER -> QUEUES_MUTEX THEN CLIENTS_MUTEX
     {
+        //lock on queues_mutex to prevent data race when checking if client exists and getting sockets of subscribers
         std::lock_guard<std::mutex> lock_q(queues_mutex);
+        //lock on clients_mutex to prevent data race when checking if client exists and getting sockets of subscribers
         std::lock_guard<std::mutex> lock_c(clients_mutex);
         auto it = clients.find(id);
         
@@ -24,7 +27,7 @@ Client get_client_id(Client client, std::string& id) {
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.disconnect_time).count();
                 
                 if (elapsed >= SECONDS_TO_CLEAR_CLIENT) {
-                    for (auto& [name, queue] : Existing_Queues) {
+                    for (auto& [name, queue] : existing_queues) {
                         auto sub_it = std::find(queue.subscribers.begin(), 
                                                queue.subscribers.end(), id);
                         if (sub_it != queue.subscribers.end()) {
@@ -53,7 +56,7 @@ Client get_client_id(Client client, std::string& id) {
     }
     
     if (id_active) {
-        if(!send_message(client.socket, prepare_message("LO", "ER:ID_TAKEN"))){
+        if(!send_message(client.socket, prepare_message(message_type::LOGIN, "ER:ID_TAKEN"))){
             safe_error("SEND_ERROR: LO:ER to socket:" + std::to_string(client.socket));
         }
         client.id = "";
@@ -61,12 +64,12 @@ Client get_client_id(Client client, std::string& id) {
     }
     
     if (reconnected) {
-        if(!send_message(client.socket, prepare_message("LO", "OK:RECONNECTED"))){
+        if(!send_message(client.socket, prepare_message(message_type::LOGIN, "OK:RECONNECTED"))){
             safe_error("SEND_ERROR: LO:OK to " + client.id);
         }
         safe_print("Client " + client.id + " reconnected");
     } else {
-        if(!send_message(client.socket, prepare_message("LO", "OK:LOGGED"))){
+        if(!send_message(client.socket, prepare_message(message_type::LOGIN, "OK:LOGGED"))){
             safe_error("SEND_ERROR: LO:OK to " + client.id);
         }
         safe_print("Client " + client.id + " connected");
