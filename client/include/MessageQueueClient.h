@@ -22,7 +22,6 @@ constexpr size_t SOCKET_TIMEOUT_VALUE = 5;
 //
 // Example usage:
 //
-// @code
 // MessageQueueClient client("user1");
 //
 // if (!client.connect_to_server("127.0.0.1", "9000")) {
@@ -42,7 +41,6 @@ constexpr size_t SOCKET_TIMEOUT_VALUE = 5;
 // }
 //
 // client.disconnect();
-// @endcode
 //
 // Internally, a dedicated receiver thread continuously reads data
 // from the server and converts messages into Event objects.
@@ -89,7 +87,7 @@ class MessageQueueClient {
     bool is_connected() const { return _connected; };
 
 private:
-    int _socket = -1;
+    std::atomic<int> _socket{-1};
     std::string _client_login;
     std::thread _receiver_thread;
     std::atomic<bool> _connected{false};

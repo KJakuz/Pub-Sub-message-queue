@@ -75,12 +75,12 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
 void MessageQueueClient::disconnect() {
     if (!_connected.exchange(false)) return; 
 
-    if (_socket != -1) {
-        _socket = -1;
-        shutdown(_socket, SHUT_RDWR);
-        if (_receiver_thread.joinable()) _receiver_thread.join();
-        close(_socket);
+    int sock = _socket.exchange(-1);
+    if (sock != -1) {
+        shutdown(sock, SHUT_RDWR);
+        close(sock);
     }
+    if (_receiver_thread.joinable()) _receiver_thread.join();
 }
 
 void MessageQueueClient::_handle_disconnect_event() {
@@ -136,30 +136,33 @@ bool MessageQueueClient::_verify_connection() {
 // ------------------------------
 
 bool MessageQueueClient::create_queue(const std::string &queue_name) {
+    if (!_connected.load()) return false;
     if (!_is_valid_queue_name(queue_name)) return false;
     std::string message = Protocol::_prepare_message(Role::Publisher, Action::Create, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::delete_queue(const std::string &queue_name) {
+    if (!_connected.load()) return false;
     std::string message = Protocol::_prepare_message(Role::Publisher, Action::Delete, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::publish(const std::string &queue_name, const std::string &content, uint32_t ttl) {
-    if (!_is_valid_ttl(ttl)) return false;
-
+    if (!_is_valid_ttl(ttl) || !_connected.load()) return false;
     std::string internal_payload = Protocol::_pack_publish_data(queue_name, content, ttl);
     std::string message = Protocol::_prepare_message(Role::Publisher, Action::Publish, internal_payload);
     return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::subscribe(const std::string &queue_name) {
+    if (!_connected.load()) return false;
     std::string message = Protocol::_prepare_message(Role::Subscriber, Action::Subscribe, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
 
 bool MessageQueueClient::unsubscribe(const std::string &queue_name) {
+    if (!_connected.load()) return false;
     std::string message = Protocol::_prepare_message(Role::Subscriber, Action::Unsubscribe, queue_name);
     return MessageQueueClient::_send_message(_socket, message);
 }
@@ -198,9 +201,8 @@ void MessageQueueClient::_receiver_loop() {
     char header_buffer[HEADER_PACKET_SIZE];
 
     while (_connected.load()) {
-        if (_socket == -1) break;
-        if (!_read_exactly(_socket, header_buffer, HEADER_PACKET_SIZE))
-        {
+        if (_socket.load() == -1) break;
+        if (!_read_exactly(_socket, header_buffer, HEADER_PACKET_SIZE)) {
             _handle_disconnect_event();
             break;
         }

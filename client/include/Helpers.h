@@ -9,5 +9,5 @@ bool _is_valid_queue_name(const std::string &name);
 
 // @brief Check if TTL has valid value.
 //
-// TTL should be 0-3600 seconds.
+// TTL should be 1-3600 seconds.
 bool _is_valid_ttl(uint32_t ttl);

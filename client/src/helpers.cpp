@@ -20,5 +20,5 @@ bool _is_valid_queue_name(const std::string &name) {
 }
 
 bool _is_valid_ttl(uint32_t ttl) {
-    return ttl < 0 || ttl > 3600;
+    return ttl > 0 && ttl <= 3600;
 }
