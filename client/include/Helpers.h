@@ -1,3 +1,5 @@
+#pragma once
+
 #include <string>
 
 // @brief Check if queue name is valid.

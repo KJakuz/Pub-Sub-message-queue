@@ -13,7 +13,7 @@
 #include <cstring>
 #include <arpa/inet.h>
 
-constexpr size_t SOCKET_TIMEOUT_VALUE = 5;
+constexpr size_t SOCKET_TIMEOUT_VALUE = 1;
 
 // @class MessageQueueClient
 // @brief Message queue client supporting publishing and subscribing.
@@ -114,7 +114,7 @@ private:
     // Seends a login message and expects an OK response.
     // @return true if verification succeeded.
     bool _verify_connection();
-    void _handle_disconnect_event();
+    void _handle_disconnect_event(std::string reason);
 
     void _dispatch_event(char &role, char &cmd, std::string &payload, Event &ev);
 };

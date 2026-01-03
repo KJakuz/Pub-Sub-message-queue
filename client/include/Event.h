@@ -1,3 +1,5 @@
+#pragma once
+
 #include <string>
 #include <vector>
 
@@ -35,7 +37,7 @@ class Event {
     const std::vector<std::string> &items() const { return _result; }
 
  private:
-    Type _type;
+    Type _type = Type::Unknown;
     std::string _source;
     std::vector<std::string> _result;
 

@@ -49,9 +49,10 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
         return false;
     }
     _socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-
+    constexpr int reuse{1};
+    setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
     struct timeval tv;
-    tv.tv_sec = SOCKET_TIMEOUT_VALUE;
+    tv.tv_sec = 2;  // Reduced from SOCKET_TIMEOUT_VALUE (was 5 seconds)
     tv.tv_usec = 0;
     setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
 
@@ -83,12 +84,12 @@ void MessageQueueClient::disconnect() {
     if (_receiver_thread.joinable()) _receiver_thread.join();
 }
 
-void MessageQueueClient::_handle_disconnect_event() {
+void MessageQueueClient::_handle_disconnect_event(std::string reason) {
     if(!_connected.load()) return; // We don't bother with handling event when we are disconnecting
 
     Event ev;
     ev._type = Event::Type::Disconnected;
-    ev._result.push_back("Connection lost.");
+    ev._result.push_back(reason);
 
     {
         std::lock_guard<std::mutex> lock(_event_mutex);
@@ -121,7 +122,7 @@ bool MessageQueueClient::_verify_connection() {
     }
     // Server accept new client by sending LO message.
     if (role == 'L' && cmd == 'O') {
-        if (payload.substr(0,2) == "OK") {
+        if (payload.find("OK") == 0) {
             thread_safe_print("DEBUG: Server accepted login: " + payload);
             return true;
         }
@@ -203,14 +204,13 @@ void MessageQueueClient::_receiver_loop() {
     while (_connected.load()) {
         if (_socket.load() == -1) break;
         if (!_read_exactly(_socket, header_buffer, HEADER_PACKET_SIZE)) {
-            _handle_disconnect_event();
+            _handle_disconnect_event("Reading packet failed.");
             break;
         }
         auto [role, cmd, payload_len] = Protocol::_decode_packet(std::string(header_buffer, HEADER_PACKET_SIZE));
 
         if (payload_len > MAX_PAYLOAD) {
-            thread_safe_print("DEBUG: Payload too big");
-            _handle_disconnect_event();
+            _handle_disconnect_event("Payload too big");
             break;
         }
 
@@ -220,7 +220,7 @@ void MessageQueueClient::_receiver_loop() {
             payload.resize(payload_len);
             if (!_read_exactly(_socket, payload.data(), payload_len))
             {
-                _handle_disconnect_event();
+                _handle_disconnect_event("Read exactly failed.");
                 break;
             }
         }
@@ -382,7 +382,8 @@ std::vector<std::string> MessageQueueClient::_handle_new_sub_messages(const std:
 
 bool MessageQueueClient::poll_event(Event &ev) {
     std::unique_lock<std::mutex> lock(_event_mutex);
-    _event_cv.wait(lock, [this] { return !_event_queue.empty() || !_connected; });
+    _event_cv.wait_for(lock, std::chrono::milliseconds(100), 
+        [this] { return !_event_queue.empty() || !_connected; });
 
     if (_event_queue.empty()) return false;
 
