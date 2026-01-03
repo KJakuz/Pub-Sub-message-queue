@@ -29,7 +29,7 @@ std::string Protocol::_pack_publish_data(const std::string &queue_name, const st
 std::tuple<char, char, uint32_t> Protocol::_decode_packet(const std::string &full_message) {
         if (full_message.size() < HEADER_PACKET_SIZE) {
             return {0, 0, 0};
-        } // todo: think about better way what to do if error
+        }
 
         char role = full_message[0];
         char cmd = full_message[1];

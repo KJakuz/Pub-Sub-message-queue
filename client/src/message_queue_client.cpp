@@ -298,15 +298,6 @@ void MessageQueueClient::_dispatch_event(char &role, char &cmd, std::string &pay
 // HANDLING MESSAGES
 // ------------------------------
 
-// @brief Process payload and read size in correct endian order.
-// @param data Data that we want to process.
-// @param offset Offset for reading data.
-// @param output Size variable where converted value will be saved.
-void extract_convert_net_to_host(const std::string &data, size_t offset, uint32_t& output) {
-    std::memcpy(&output, data.data() + offset, sizeof(uint32_t));
-    output = ntohl(output);
-}
-
 std::tuple<std::string, std::string> MessageQueueClient::_handle_message_payload(const std::string &payload) {
     if (payload.size() < 4) {
         thread_safe_print("DEBUG: Incorrect message from server.");

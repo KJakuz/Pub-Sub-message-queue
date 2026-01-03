@@ -16,75 +16,110 @@
 constexpr size_t SOCKET_TIMEOUT_VALUE = 1;
 
 // @class MessageQueueClient
-// @brief Message queue client supporting publishing and subscribing.
+// @brief Client for interacting with a message queue server.
 //
-// @param user_login - an unique user login should be provided.
+// @param client_login Unique user login.
 //
-// Example usage:
+// MessageQueueClient provides an asynchronous API for publishing and
+// subscribing to named queues over a TCP connection.
 //
-// MessageQueueClient client("user1");
+// The client maintains an internal receiver thread that continuously
+// reads data from the server and converts incoming messages into Event
+// objects. These events can be retrieved by calling poll_event().
 //
-// if (!client.connect_to_server("127.0.0.1", "9000")) {
-//      handle error
-// }
+// - Public action methods (create_queue, publish, subscribe, etc.)
+// return true if the request was successfully sent to the server.
+// A return value of true does NOT guarantee that the server accepted
+// or successfully processed the request.
 //
-// client.create_queue("jobs");
+// - Server-side failures, protocol errors, and connection issues are
+// reported asynchronously as Event::Type::Error or
+// Event::Type::Disconnected events.
 //
-// client.publish("jobs", "hello world", 60);
+// - Methods return false only for local failures such as invalid
+// arguments, disconnected state, or socket send errors.
 //
-// client.subscribe("jobs");
-//
-// Event ev;
-//
-// while (client.poll_event(ev)) {
-//      process event
-// }
-//
-// client.disconnect();
-//
-// Internally, a dedicated receiver thread continuously reads data
-// from the server and converts messages into Event objects.
-//
-// Events are stored in an internal queue and retrieved by calling poll_event().
+// - The client starts one internal receiver thread upon successful
+// connection.
+// - All public methods are thread-safe and may be called concurrently.
 class MessageQueueClient {
  public:
     MessageQueueClient();
     MessageQueueClient(const std::string &client_login);
     ~MessageQueueClient();
 
-    // @brief Connect to the message queue server.
+    // @brief Connect to the server.
     //
-    // Establishes a TCP connection and performs a handshake.
+    // Establishes a TCP connection and performs a protocol handshake using
+    // the client login provided at construction time.
     //
-    // @param host Server hostname or IP address.
-    // @param port Server port number.
-    // @return true on successful connection, false otherwise.
+    // On success, a dedicated receiver thread is started.
+    //
+    // @param host Server hostname or IPv4 address.
+    // @param port Server port number (string representation).
+    //
+    // @return true if the connection and handshake succeeded,
+    //         false otherwise.
+    //
+    // @note This function must be called before any publish or subscribe
+    //       operations.
     bool connect_to_server(const std::string &host, const std::string &port);
-    
-    //@brief Disconnect from the server.
+
+    // @brief Disconnect from the server.
     //
-    // Stops the receiver thread, shutdowns connection, closes the socket.
+    // Stops the receiver thread, shuts down the socket, and releases
+    // all associated resources.
     void disconnect();
 
+    // @brief Request creation of a new queue.
+    //
+    // Sends a queue creation request to the server. The result of the
+    // operation (success or failure) is delivered asynchronously via
+    // an Event::Type::StatusUpdate or Event::Type::Error event.
+    //
+    // @param queue_name Name of the queue to create.
+    //
+    // @return true if the request was successfully sent to the server,
+    // false if the client is disconnected or the queue name is invalid.
     bool create_queue(const std::string &queue_name);
     bool delete_queue(const std::string &queue_name);
+
+    // @brief Publish a message to a queue.
+    //
+    // Sends a publish request to the server with the specified message
+    // content and time-to-live (TTL). Server-side acceptance or rejection
+    // is reported asynchronously via events.
+    //
+    // @param queue_name Name of the target queue.
+    // @param content Message payload.
+    // @param ttl Time-to-live in seconds.
+    //
+    // @return true if the request was sent successfully,
+    // false if the client is disconnected or arguments are invalid.
     bool publish(const std::string &queue_name, const std::string &content, uint32_t ttl);
 
+    // @brief Subscribe to active queue.
     bool subscribe(const std::string &queue_name);
+    // @brief Unubscribe active (and subscribed) queue.
     bool unsubscribe(const std::string &queue_name);
 
-    // @brief Retrieve the next pending event from the server.
+    // @brief Retrieve the next pending event.
     //
-    // @param ev Output parameter receiving the event.
-    // @return true if an event was retrieved, false otherwise.
+    // Blocks until an event is available, the client disconnects or timeout.
+    //
+    // @param ev Output parameter receiving the next event.
+    //
+    // @return true if an event was retrieved, false if the client is disconnected, no events remain or timeout.
     bool poll_event(Event &ev);
 
+    // @brief Return list of currently available queues.
     std::vector<std::string> get_available_queues() {
         std::lock_guard<std::mutex> lock(_queues_cache_mutex);
         return _available_queues;
     }
 
-    bool is_connected() const { return _connected; };
+    // @brief Check connection.
+    bool is_connected() const { return _connected.load(); };
 
 private:
     std::atomic<int> _socket{-1};
@@ -114,7 +149,7 @@ private:
     // Seends a login message and expects an OK response.
     // @return true if verification succeeded.
     bool _verify_connection();
-    void _handle_disconnect_event(std::string reason);
+    void _handle_disconnect_event(const std::string reason);
 
     void _dispatch_event(char &role, char &cmd, std::string &payload, Event &ev);
 };

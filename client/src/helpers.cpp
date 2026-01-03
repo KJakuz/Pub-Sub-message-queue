@@ -22,3 +22,8 @@ bool _is_valid_queue_name(const std::string &name) {
 bool _is_valid_ttl(uint32_t ttl) {
     return ttl > 0 && ttl <= 3600;
 }
+
+void extract_convert_net_to_host(const std::string &data, size_t offset, uint32_t &output) {
+    std::memcpy(&output, data.data() + offset, sizeof(uint32_t));
+    output = ntohl(output);
+}
