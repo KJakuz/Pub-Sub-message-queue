@@ -9,7 +9,7 @@ bool _is_valid_queue_name(const std::string &name) {
         return false;
 
     // Queue name should start with a letter
-    if (!std::isalpha(name[0]))
+    if (!std::isalpha(static_cast<unsigned char>(name[0])))
         return false;
 
     // Check for allowed characters

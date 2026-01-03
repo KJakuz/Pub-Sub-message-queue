@@ -52,12 +52,12 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
         return false;
     }
     _socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    constexpr int reuse{1};
-    setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
-    struct timeval tv;
+    const int reuse{1};
+    setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    struct timeval tv{};
     tv.tv_sec = SOCKET_TIMEOUT_VALUE;
     tv.tv_usec = 0;
-    setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
+    setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     if (connect(_socket, res->ai_addr, res->ai_addrlen) == -1) {
         thread_safe_print("DEBUG: Error with connect");
@@ -117,7 +117,7 @@ bool MessageQueueClient::_verify_connection() {
     if (!_read_exactly(_socket, header, HEADER_PACKET_SIZE))
         return false;
 
-    auto [role, cmd, len] = Protocol::_decode_packet(std::string(header, 6));
+    auto [role, cmd, len] = Protocol::_decode_packet(std::string(header, HEADER_PACKET_SIZE));
 
     if (len > MAX_PAYLOAD) {
         thread_safe_print("DEBUG: Server sent too much data.");
@@ -132,7 +132,6 @@ bool MessageQueueClient::_verify_connection() {
     // Server accept new client by sending LO message.
     if (role == 'L' && cmd == 'O') {
         if (payload.find("OK") == 0) {
-            thread_safe_print("DEBUG: Server accepted login: " + payload);
             return true;
         }
     }
@@ -218,22 +217,20 @@ void MessageQueueClient::_receiver_loop() {
         auto [role, cmd, payload_len] = Protocol::_decode_packet(std::string(header_buffer, HEADER_PACKET_SIZE));
 
         if (payload_len > MAX_PAYLOAD) {
-            _handle_error_event("Payload too big", false);
+            _handle_error_event("Message from server is too big.", false);
             std::string discard;
             discard.resize(payload_len);
             if (!_read_exactly(_socket, discard.data(), payload_len)) {
-                _handle_error_event("Failed to read oversized payload", true);
+                _handle_error_event("Failed to read oversized payload.", true);
                 break;
             }
             continue;
         }
 
         std::string payload;
-        if (payload_len > 0)
-        {
+        if (payload_len > 0) {
             payload.resize(payload_len);
-            if (!_read_exactly(_socket, payload.data(), payload_len))
-            {
+            if (!_read_exactly(_socket, payload.data(), payload_len)) {
                 _handle_error_event("Read exactly failed.", true);
                 break;
             }
