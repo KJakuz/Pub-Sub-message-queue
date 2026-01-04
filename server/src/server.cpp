@@ -222,10 +222,17 @@ void handle_client(int client_socket){
 
 int main(int argc, char  **argv){
     
-    if (argc < 2) {
-        safe_error("Usage: " + std::string(argv[0]) + " <port>");
+    if (argc != 2) {
+        std::cerr<<"Usage: " + std::string(argv[0]) + " <port>\n";
         return -1;
     }
+
+    int port = atoi(argv[1]);
+    if (port < 1 || port > 65535) {
+        std::cerr<<"Error: Invalid port number (1-65535).\n";
+        return -1;
+    }
+
 
     signal(SIGINT, signal_handler);
     signal(SIGPIPE, SIG_IGN);

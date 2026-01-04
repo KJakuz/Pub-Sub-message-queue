@@ -5,11 +5,14 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 std::atomic<bool> g_running{true};
+std::mutex io_mutex;
 
 void print_help()
 {
+    std::lock_guard<std::mutex> lock(io_mutex);
     std::cout << "\n--- Available Commands ---\n"
               << "  list              - Show cached queues\n"
               << "  create <name>     - Create a new queue\n"
@@ -43,6 +46,7 @@ int main(int argc, char *argv[])
         while (g_running) {
             Event ev;
             if (client.poll_event(ev)) {
+                std::lock_guard<std::mutex> lock(io_mutex);
                 std::cout << "\r"; 
 
                 switch (ev.type()) {
@@ -79,7 +83,10 @@ int main(int argc, char *argv[])
     std::string input;
     while (g_running)
     {
-        std::cout << "> " << std::flush;
+        {
+            std::lock_guard<std::mutex> lock(io_mutex);
+            std::cout << "> " << std::flush;
+        }
         if (!std::getline(std::cin, input) || input == "exit")
             break;
         if (input.empty())
@@ -96,6 +103,7 @@ int main(int argc, char *argv[])
         else if (cmd == "list")
         {
             auto queues = client.get_available_queues();
+            std::lock_guard<std::mutex> lock(io_mutex);
             std::cout << "Available: ";
             for (const auto &q : queues)
                 std::cout << "[" << q << "] ";
@@ -104,18 +112,21 @@ int main(int argc, char *argv[])
         else if (cmd == "create" && !arg1.empty())
         {
             if (!client.create_queue(arg1)) {
+                std::lock_guard<std::mutex> lock(io_mutex);
                 std::cout << "[ERROR] Invalid queue name.\n";
             }
         }
         else if (cmd == "sub" && !arg1.empty())
         {
             if (!client.subscribe(arg1)) {
+                std::lock_guard<std::mutex> lock(io_mutex);
                 std::cout << "[ERROR] Failed to subscribe to queue.\n";
             }
         }
         else if (cmd == "unsub" && !arg1.empty())
         {
             if (!client.unsubscribe(arg1)) {
+                std::lock_guard<std::mutex> lock(io_mutex);
                 std::cout << "[ERROR] Failed to unsubscribe from queue.\n";
             }
         }
@@ -124,8 +135,10 @@ int main(int argc, char *argv[])
             std::getline(ss >> std::ws, arg2);
             if (!arg2.empty())
                 client.publish(arg1, arg2, 60);
-            else
+            else {
+                std::lock_guard<std::mutex> lock(io_mutex);
                 std::cout << "Usage: pub <queue> <message>\n";
+            }
         }
         else if (cmd == "delete" && !arg1.empty())
         {
@@ -133,6 +146,7 @@ int main(int argc, char *argv[])
         }
         else
         {
+            std::lock_guard<std::mutex> lock(io_mutex);
             std::cout << "Unknown command: '" << cmd << "'. Type 'help' for info.\n";
         }
     }
