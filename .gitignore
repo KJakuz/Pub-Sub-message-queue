@@ -5,3 +5,8 @@ build/
 CMakeFiles
 Makefile
 *.cmake
+
+/bin
+CmakeCache.txt
+
+/lib

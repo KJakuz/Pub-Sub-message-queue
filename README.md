@@ -8,7 +8,7 @@ Klient łączy się do serwera i wysyła swój identyfikator (jeśli identyfikat
 Klient po połączeniu się z serwerem ma do wyboru tryb subskrybenta lub wydawcy.
 Opcja subskrybenta pozwala na:
         • Zasubskrybowanie kolejek dostępnych na serwerze (dostępnych tj. wcześniej stworzonych przez wydawców w tej sesji uruchomienia serwera).
-        • Wyświetlanie nadchodzących aktualnie komunikatów z kolejek które subskrybent śledzi.
+        • Odbieranie nadchodzących aktualnie komunikatów z kolejek które subskrybent śledzi.
         • Rezygnację z subskrypcji.
 Opcja wydawcy pozwala na:
         • Stworzenie nowej kolejki.
