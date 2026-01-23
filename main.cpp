@@ -70,6 +70,8 @@ int main(int argc, char *argv[])
                     case Event::Type::Disconnected:
                         std::cout << "[SYSTEM] " << ev.text() << "\n";
                         g_running = false;
+                        std::cin.setstate(std::ios::eofbit);
+                        fclose(stdin); 
                         break;
                     default: break;
                 }

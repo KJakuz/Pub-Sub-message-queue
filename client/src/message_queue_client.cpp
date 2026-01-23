@@ -77,13 +77,16 @@ bool MessageQueueClient::connect_to_server(const std::string &host, const std::s
 }
 
 void MessageQueueClient::disconnect() {
-    if (!_connected.exchange(false)) return; 
-
-    int sock = _socket.exchange(-1);
-    if (sock != -1) {
-        shutdown(sock, SHUT_RDWR);
-        close(sock);
+    bool was_connected = _connected.exchange(false);
+    
+    if (was_connected) {
+        int sock = _socket.exchange(-1);
+        if (sock != -1) {
+            shutdown(sock, SHUT_RDWR);
+            close(sock);
+        }
     }
+    
     if (_receiver_thread.joinable()) _receiver_thread.join();
 }
 
